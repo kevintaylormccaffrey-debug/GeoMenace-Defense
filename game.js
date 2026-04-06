@@ -9,6 +9,9 @@ const turretCountsEl = document.getElementById("turretCounts");
 
 const towerButtons = [...document.querySelectorAll(".tower-btn")];
 const startWaveBtn = document.getElementById("startWaveBtn");
+const rerollMapBtn = document.getElementById("rerollMapBtn");
+const restartLevelBtn = document.getElementById("restartLevelBtn");
+const sellModeBtn = document.getElementById("sellModeBtn");
 const fastForwardBtn = document.getElementById("fastForwardBtn");
 const restartBtn = document.getElementById("restartBtn");
 
@@ -24,8 +27,8 @@ const TOWER_TYPES = {
     name: "Basic Turret",
     cost: 100,
     range: 145,
-    damage: 16,
-    fireRate: 0.75,
+    damage: 15,
+    fireRate: 1,
     color: "#2563eb",
     barrelColor: "#93c5fd",
     projectileColor: "#fde047",
@@ -37,24 +40,19 @@ const TOWER_TYPES = {
     name: "Ice Turret",
     cost: 150,
     range: 130,
-    damage: 10,
-    fireRate: 2,
     color: "#0891b2",
     barrelColor: "#67e8f9",
-    projectileColor: "#67e8f9",
-    targetMode: "progress",
-    projectileSpeed: 320,
+    aura: true,
     slowAmount: 0.25,
-    slowDuration: 1,
-    maxCount: 3,
-    projectileStyle: "snowflake"
+    slowDuration: 0.2,
+    maxCount: 3
   },
   rocket: {
     id: "rocket",
     name: "Rocket Turret",
     cost: 300,
     range: 175,
-    damage: 12,
+    damage: 14,
     fireRate: 3,
     color: "#7c3aed",
     barrelColor: "#c4b5fd",
@@ -81,6 +79,8 @@ const state = {
   spawning: false,
   hoveredTile: null,
   selectedTowerType: null,
+  sellMode: false,
+  mouseCanvasPos: null,
   enemiesSpawnedThisWave: 0,
   enemiesToSpawnThisWave: 0,
   spawnTimer: 0,
@@ -208,6 +208,7 @@ class Enemy {
     this.radius = config.radius ?? 13;
     this.baseDamage = config.baseDamage ?? 1;
     this.isBoss = Boolean(config.isBoss);
+    this.shape = config.shape || "circle";
     this.baseColor = config.color || "#8b0000";
     this.slowMultiplier = 1;
     this.slowTimer = 0;
@@ -262,9 +263,21 @@ class Enemy {
     const hpRatio = Math.max(0, this.hp / this.maxHp);
     const bodyColor = this.hitFlashTimer > 0 ? darkenHexColor(this.baseColor, 0.35) : this.baseColor;
     ctx.fillStyle = bodyColor;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-    ctx.fill();
+    if (this.shape === "triangle") {
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y - this.radius);
+      ctx.lineTo(this.x + this.radius * 0.9, this.y + this.radius * 0.8);
+      ctx.lineTo(this.x - this.radius * 0.9, this.y + this.radius * 0.8);
+      ctx.closePath();
+      ctx.fill();
+    } else if (this.shape === "square") {
+      const side = this.radius * 1.75;
+      ctx.fillRect(this.x - side / 2, this.y - side / 2, side, side);
+    } else {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     if (this.isBoss) {
       drawBossFace(this.x, this.y, this.radius);
@@ -286,15 +299,16 @@ class Tower {
     this.y = tileY * TILE_SIZE + TILE_SIZE / 2;
     this.typeId = type.id;
     this.range = type.range;
-    this.damage = type.damage;
-    this.fireRate = type.fireRate;
+    this.damage = type.damage ?? 0;
+    this.fireRate = type.fireRate ?? 0;
     this.projectileColor = type.projectileColor;
-    this.projectileSpeed = type.projectileSpeed;
+    this.projectileSpeed = type.projectileSpeed ?? 340;
     this.slowAmount = type.slowAmount || 0;
     this.slowDuration = type.slowDuration || 0;
     this.splash = Boolean(type.splash);
     this.splashHalfSize = type.splashHalfSize || TILE_SIZE / 2;
     this.projectileStyle = type.projectileStyle || "orb";
+    this.aura = Boolean(type.aura);
     this.targetMode = type.targetMode || "progress";
     this.color = type.color;
     this.barrelColor = type.barrelColor;
@@ -302,6 +316,16 @@ class Tower {
   }
 
   update(dt) {
+    if (this.aura) {
+      for (const enemy of state.enemies) {
+        const dist = Math.hypot(enemy.x - this.x, enemy.y - this.y);
+        if (dist <= this.range) {
+          enemy.applySlow(this.slowAmount, this.slowDuration);
+        }
+      }
+      return;
+    }
+
     this.cooldown -= dt;
     if (this.cooldown > 0) {
       return;
@@ -334,9 +358,6 @@ class Tower {
       if (dist > this.range) {
         continue;
       }
-      if (this.typeId === "ice" && enemy.slowTimer > 0) {
-        continue;
-      }
       const metric = this.targetMode === "highestHp" ? enemy.hp : enemy.pathIndex;
       if (metric > bestMetric) {
         best = enemy;
@@ -348,6 +369,17 @@ class Tower {
   }
 
   draw() {
+    if (this.aura) {
+      ctx.strokeStyle = "rgba(103, 232, 249, 0.28)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(103, 232, 249, 0.07)";
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = this.color;
     ctx.fillRect(this.x - 14, this.y - 14, 28, 28);
     ctx.fillStyle = this.barrelColor;
@@ -492,8 +524,60 @@ function spawnEnemy() {
     return;
   }
   const randomPath = mapPathOptions[Math.floor(Math.random() * mapPathOptions.length)];
-  state.enemies.push(new Enemy(state.waveConfig, randomPath));
+  const typeConfig = getEnemyTypeForWave(state.wave);
+  const enemyConfig = {
+    ...state.waveConfig,
+    hp: Math.floor(state.waveConfig.hp * typeConfig.hpMultiplier),
+    speed: state.waveConfig.speed * typeConfig.speedMultiplier,
+    radius: typeConfig.radius ?? state.waveConfig.radius,
+    color: typeConfig.color,
+    shape: typeConfig.shape
+  };
+  state.enemies.push(new Enemy(enemyConfig, randomPath));
   state.enemiesSpawnedThisWave += 1;
+}
+
+function getEnemyTypeForWave(wave) {
+  // Keep boss wave as dedicated boss enemy.
+  if (wave === 10) {
+    return {
+      shape: "circle",
+      color: "#7f1d1d",
+      hpMultiplier: 1,
+      speedMultiplier: 1
+    };
+  }
+
+  const pool = [
+    {
+      shape: "circle",
+      color: "#8b0000",
+      hpMultiplier: 1,
+      speedMultiplier: 1
+    }
+  ];
+
+  if (wave >= 3) {
+    pool.push({
+      shape: "triangle",
+      color: "#0f766e",
+      hpMultiplier: 0.75,
+      speedMultiplier: 1.25,
+      radius: 12
+    });
+  }
+
+  if (wave >= 7) {
+    pool.push({
+      shape: "square",
+      color: "#7c3f00",
+      hpMultiplier: 1.35,
+      speedMultiplier: 0.82,
+      radius: 14
+    });
+  }
+
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function getWaveConfig(wave) {
@@ -514,11 +598,11 @@ function getWaveConfig(wave) {
   if (wave === 10) {
     return {
       enemyCount: 1,
-      hp: 1800,
-      speed: 36,
+      hp: 2700,
+      speed: 54,
       spawnInterval: 1.2,
-      baseDamage: 8,
-      radius: 26,
+      baseDamage: 12,
+      radius: 39,
       isBoss: true,
       color: "#7f1d1d"
     };
@@ -632,6 +716,37 @@ function placeTower(tileX, tileY) {
   state.towers.push(new Tower(tileX, tileY, towerType.id));
 }
 
+function sellTower(tileX, tileY) {
+  const towerIndex = state.towers.findIndex((tower) => tower.tileX === tileX && tower.tileY === tileY);
+  if (towerIndex < 0) {
+    return;
+  }
+  const tower = state.towers[towerIndex];
+  const towerType = TOWER_TYPES[tower.typeId];
+  if (towerType) {
+    state.gold += towerType.cost;
+  }
+  state.towers.splice(towerIndex, 1);
+}
+
+function restartCurrentLevel() {
+  if (!state.waveInProgress || state.baseHp <= 0 || state.gameWon) {
+    return;
+  }
+  state.enemies = [];
+  state.projectiles = [];
+  state.effects = [];
+  state.waveInProgress = false;
+  state.spawning = false;
+  state.enemiesSpawnedThisWave = 0;
+  state.enemiesToSpawnThisWave = 0;
+  state.spawnTimer = 0;
+  state.waveConfig = null;
+  for (const tower of state.towers) {
+    tower.cooldown = 0;
+  }
+}
+
 function countTowersByType(typeId) {
   return state.towers.filter((tower) => tower.typeId === typeId).length;
 }
@@ -707,7 +822,8 @@ function update(dt) {
 
     state.wave += 1;
     startWaveBtn.disabled = false;
-    state.gold += completedWave * 10;
+    const waveBonus = completedWave === 1 ? 40 : completedWave * 10;
+    state.gold += waveBonus;
   }
 }
 
@@ -848,6 +964,18 @@ function drawHoveredTowerRange() {
   ctx.fill();
 }
 
+function drawSellCursorIndicator() {
+  if (!state.sellMode || !state.mouseCanvasPos) {
+    return;
+  }
+  const { x, y } = state.mouseCanvasPos;
+  ctx.fillStyle = "rgba(34, 197, 94, 0.9)";
+  ctx.font = "bold 22px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("$", x + 12, y - 12);
+}
+
 function drawGameOver() {
   if (state.baseHp > 0) {
     return;
@@ -912,6 +1040,7 @@ function draw() {
   for (const effect of state.effects) {
     effect.draw();
   }
+  drawSellCursorIndicator();
   drawGameOver();
   drawVictoryScreen();
 }
@@ -931,10 +1060,16 @@ function updateHud() {
   turretCountsEl.textContent = `Basic ${basicCount}, Ice ${iceCount}/3, Rocket ${rocketCount}/2`;
 
   startWaveBtn.disabled = state.baseHp <= 0 || state.waveInProgress || state.gameWon || state.wave > FINAL_WAVE;
+  rerollMapBtn.disabled = state.waveInProgress;
+  restartLevelBtn.disabled =
+    state.baseHp <= 0 || state.gameWon || !state.waveInProgress || state.wave > FINAL_WAVE;
   restartBtn.classList.toggle("hidden", !(state.baseHp <= 0 || state.gameWon));
   fastForwardBtn.disabled = state.baseHp <= 0 || state.gameWon;
   fastForwardBtn.classList.toggle("speed-btn-active", state.fastForward);
   fastForwardBtn.textContent = state.fastForward ? "Fast Forward x2 (On)" : "Fast Forward x2";
+  sellModeBtn.disabled = state.baseHp <= 0 || state.gameWon;
+  sellModeBtn.classList.toggle("sell-mode-active", state.sellMode);
+  sellModeBtn.textContent = state.sellMode ? "Sell Turret (On)" : "Sell Turret";
 
   for (const button of towerButtons) {
     const typeId = button.dataset.towerType;
@@ -969,22 +1104,33 @@ function gameLoop(now) {
 
 canvas.addEventListener("mousemove", (event) => {
   const rect = canvas.getBoundingClientRect();
-  const x = Math.floor((event.clientX - rect.left) / (rect.width / canvas.width) / TILE_SIZE);
-  const y = Math.floor((event.clientY - rect.top) / (rect.height / canvas.height) / TILE_SIZE);
+  const canvasX = (event.clientX - rect.left) / (rect.width / canvas.width);
+  const canvasY = (event.clientY - rect.top) / (rect.height / canvas.height);
+  state.mouseCanvasPos = { x: canvasX, y: canvasY };
+  const x = Math.floor(canvasX / TILE_SIZE);
+  const y = Math.floor(canvasY / TILE_SIZE);
   state.hoveredTile = { x, y };
 });
 
 canvas.addEventListener("mouseleave", () => {
   state.hoveredTile = null;
+  state.mouseCanvasPos = null;
 });
 
 canvas.addEventListener("click", (event) => {
-  if (!state.selectedTowerType || state.baseHp <= 0 || state.gameWon) {
+  if (state.baseHp <= 0 || state.gameWon) {
     return;
   }
   const rect = canvas.getBoundingClientRect();
   const tileX = Math.floor((event.clientX - rect.left) / (rect.width / canvas.width) / TILE_SIZE);
   const tileY = Math.floor((event.clientY - rect.top) / (rect.height / canvas.height) / TILE_SIZE);
+  if (state.sellMode) {
+    sellTower(tileX, tileY);
+    return;
+  }
+  if (!state.selectedTowerType) {
+    return;
+  }
   placeTower(tileX, tileY);
 });
 
@@ -994,16 +1140,35 @@ towerButtons.forEach((button) => {
       return;
     }
     const typeId = button.dataset.towerType;
+    state.sellMode = false;
     state.selectedTowerType = state.selectedTowerType === typeId ? null : typeId;
   });
 });
 
 startWaveBtn.addEventListener("click", startWave);
+rerollMapBtn.addEventListener("click", () => {
+  if (state.waveInProgress) {
+    return;
+  }
+  window.location.reload();
+});
+restartLevelBtn.addEventListener("click", () => {
+  restartCurrentLevel();
+});
 fastForwardBtn.addEventListener("click", () => {
   if (state.baseHp <= 0 || state.gameWon) {
     return;
   }
   state.fastForward = !state.fastForward;
+});
+sellModeBtn.addEventListener("click", () => {
+  if (state.baseHp <= 0 || state.gameWon) {
+    return;
+  }
+  state.sellMode = !state.sellMode;
+  if (state.sellMode) {
+    state.selectedTowerType = null;
+  }
 });
 restartBtn.addEventListener("click", () => {
   window.location.reload();

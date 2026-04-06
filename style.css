@@ -67,6 +67,10 @@ button:disabled {
   background: #d97706;
 }
 
+.sell-mode-active {
+  background: #16a34a;
+}
+
 .restart-btn {
   background: #059669;
 }
