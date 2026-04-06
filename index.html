@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Basic Tower Defense</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <section class="hud">
+      <h1>Basic Tower Defense</h1>
+      <div class="stats">
+        <span>Wave: <strong id="wave">1</strong></span>
+        <span>Gold: <strong id="gold">100</strong></span>
+        <span>Base HP: <strong id="baseHp">20</strong></span>
+        <span>Enemies Left: <strong id="remaining">0</strong></span>
+        <span>Turrets: <strong id="turretCounts">Basic 0, Ice 0/3, Rocket 0/2</strong></span>
+      </div>
+      <div class="controls">
+        <button id="startWaveBtn" type="button">Start Wave</button>
+        <button id="fastForwardBtn" type="button">Fast Forward x2</button>
+        <button id="restartBtn" class="restart-btn hidden" type="button">Restart Game</button>
+      </div>
+      <p class="tip">
+        Select a turret from the menu, then click a buildable tile to place it.
+      </p>
+    </section>
+
+    <section class="game-layout">
+      <aside class="tower-panel">
+        <h2>Tower Menu</h2>
+        <div class="tower-menu" id="towerMenu">
+          <button class="tower-btn" data-tower-type="basic" type="button">Basic Turret (50g)</button>
+          <button class="tower-btn" data-tower-type="ice" type="button">Ice Turret (75g)</button>
+          <button class="tower-btn" data-tower-type="rocket" type="button">Rocket Turret (200g)</button>
+        </div>
+      </aside>
+
+      <canvas id="gameCanvas" width="900" height="520" aria-label="Tower defense game area"></canvas>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
