@@ -5,7 +5,7 @@
 body {
   margin: 0;
   font-family: Arial, sans-serif;
-  background: #12161d;
+  background: radial-gradient(ellipse at 50% 0%, #1a2e28 0%, #0f1a18 45%, #0a1210 100%);
   color: #e8edf2;
 }
 
@@ -90,6 +90,27 @@ button:disabled {
   gap: 12px;
 }
 
+.game-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.game-stage-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 8px;
+  min-height: 36px;
+}
+
+.reroll-map-btn {
+  background: #475569;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+}
+
 .tower-panel {
   width: 220px;
   min-width: 220px;
@@ -109,11 +130,13 @@ button:disabled {
   text-align: left;
 }
 
-#gameCanvas {
+.game-stage canvas#gameCanvas {
   flex: 1;
   min-width: 0;
+  width: 100%;
   height: auto;
-  border: 2px solid #2d3642;
-  background: #111;
+  border: 2px solid #2a4a3d;
+  background: #0f2e24;
   display: block;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 }

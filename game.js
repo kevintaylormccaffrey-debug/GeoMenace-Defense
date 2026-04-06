@@ -18,9 +18,14 @@ const restartBtn = document.getElementById("restartBtn");
 const TILE_SIZE = 52;
 const COLS = Math.floor(canvas.width / TILE_SIZE);
 const ROWS = Math.floor(canvas.height / TILE_SIZE);
-const PATH_COLOR = "#c8a56d";
+const PATH_BASE = "#c9a87a";
+const PATH_SHADOW = "#a67c52";
+const GRASS_BASE = "#1e4d3a";
+const GRASS_DARK = "#163828";
+const GRASS_LIGHT = "#2a6b4f";
 const FINAL_WAVE = 10;
 const KILL_GOLD = 10;
+const TOWER_MENU_ORDER = ["basic", "frost", "ice", "rocket", "rail"];
 const TOWER_TYPES = {
   basic: {
     id: "basic",
@@ -35,9 +40,9 @@ const TOWER_TYPES = {
     targetMode: "progress",
     projectileSpeed: 340
   },
-  ice: {
-    id: "ice",
-    name: "Ice Turret",
+  frost: {
+    id: "frost",
+    name: "Frost Tower",
     cost: 150,
     range: 130,
     color: "#0891b2",
@@ -47,12 +52,28 @@ const TOWER_TYPES = {
     slowDuration: 0.2,
     maxCount: 3
   },
+  ice: {
+    id: "ice",
+    name: "Ice Turret",
+    cost: 150,
+    range: 130,
+    damage: 10,
+    fireRate: 2,
+    color: "#06b6d4",
+    barrelColor: "#a5f3fc",
+    projectileColor: "#67e8f9",
+    targetMode: "progress",
+    projectileSpeed: 320,
+    slowAmount: 0.25,
+    slowDuration: 1,
+    projectileStyle: "snowflake"
+  },
   rocket: {
     id: "rocket",
     name: "Rocket Turret",
     cost: 300,
     range: 175,
-    damage: 14,
+    damage: 20,
     fireRate: 3,
     color: "#7c3aed",
     barrelColor: "#c4b5fd",
@@ -63,9 +84,20 @@ const TOWER_TYPES = {
     splashHalfSize: TILE_SIZE / 2,
     maxCount: 2,
     projectileStyle: "rocket"
+  },
+  rail: {
+    id: "rail",
+    name: "Rail Gun Turret",
+    cost: 400,
+    range: 175,
+    damage: 30,
+    fireRate: 4,
+    color: "#475569",
+    barrelColor: "#fbbf24",
+    targetMode: "progress",
+    railSpeed: 780
   }
 };
-TOWER_TYPES.rocket.damage = Math.floor(TOWER_TYPES.basic.damage * 0.75);
 
 const state = {
   wave: 1,
@@ -94,62 +126,181 @@ const pathGrid = createPathGrid(selectedMap.pathTiles);
 const mapPathOptions = selectedMap.paths.map((pathTiles) => toPixelPath(pathTiles));
 const endPoint = toPixelPoint(selectedMap.endTile);
 const buildableGrid = createBuildableGrid(pathGrid);
+const spawnMarkers = (() => {
+  const list = [];
+  const seen = new Set();
+  for (const path of mapPathOptions) {
+    if (path.length < 1) {
+      continue;
+    }
+    const p0 = path[0];
+    const key = `${p0.x},${p0.y}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const angle =
+      path.length >= 2 ? Math.atan2(path[1].y - path[0].y, path[1].x - path[0].x) : 0;
+    list.push({ x: p0.x, y: p0.y, angle });
+  }
+  return list;
+})();
 
 function randomMapName() {
-  const mapNames = ["A", "Z", "W", "P"];
+  const mapNames = ["serpent", "fork", "spiral", "switchback", "canyon"];
   return mapNames[Math.floor(Math.random() * mapNames.length)];
+}
+
+function pathSerpentFull() {
+  const tiles = [];
+  for (let y = 0; y < 9; y += 1) {
+    if (y % 2 === 0) {
+      for (let x = 0; x <= COLS - 1; x += 1) {
+        tiles.push([x, y]);
+      }
+    } else {
+      for (let x = COLS - 1; x >= 0; x -= 1) {
+        tiles.push([x, y]);
+      }
+    }
+  }
+  tiles.push([COLS - 1, ROWS - 1]);
+  return tiles;
+}
+
+function dedupeConsecutiveTiles(tiles) {
+  if (!tiles.length) {
+    return tiles;
+  }
+  const out = [tiles[0]];
+  for (let i = 1; i < tiles.length; i += 1) {
+    const prev = out[out.length - 1];
+    const cur = tiles[i];
+    if (prev[0] !== cur[0] || prev[1] !== cur[1]) {
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+function pathSpiralPerimeter() {
+  const tiles = [];
+  let x0 = 0;
+  let y0 = 0;
+  let x1 = COLS - 1;
+  let y1 = ROWS - 1;
+  while (x0 <= x1 && y0 <= y1) {
+    for (let x = x0; x <= x1; x += 1) {
+      tiles.push([x, y0]);
+    }
+    y0 += 1;
+    if (y0 > y1) {
+      break;
+    }
+    for (let y = y0; y <= y1; y += 1) {
+      tiles.push([x1, y]);
+    }
+    x1 -= 1;
+    if (x0 > x1) {
+      break;
+    }
+    for (let x = x1; x >= x0; x -= 1) {
+      tiles.push([x, y1]);
+    }
+    y1 -= 1;
+    if (y0 > y1) {
+      break;
+    }
+    for (let y = y1; y >= y0; y -= 1) {
+      tiles.push([x0, y]);
+    }
+    x0 += 1;
+  }
+  return dedupeConsecutiveTiles(tiles);
+}
+
+function pathForkMergePaths() {
+  const top = [];
+  for (let x = 0; x <= 8; x += 1) {
+    top.push([x, 0]);
+  }
+  top.push([8, 1], [8, 2]);
+  const bottom = [];
+  for (let x = 0; x <= 8; x += 1) {
+    bottom.push([x, ROWS - 1]);
+  }
+  for (let y = ROWS - 2; y >= 2; y -= 1) {
+    bottom.push([8, y]);
+  }
+  const tail = [];
+  for (let x = 8; x <= COLS - 1; x += 1) {
+    tail.push([x, 2]);
+  }
+  for (let y = 3; y <= ROWS - 1; y += 1) {
+    tail.push([COLS - 1, y]);
+  }
+  const tailRest = tail[0][0] === top[top.length - 1][0] && tail[0][1] === top[top.length - 1][1] ? tail.slice(1) : tail;
+  return {
+    pathA: top.concat(tailRest),
+    pathB: bottom.concat(tailRest)
+  };
+}
+
+function pathSwitchback() {
+  const tiles = [];
+  for (let x = 0; x <= COLS - 1; x += 1) {
+    tiles.push([x, 4]);
+  }
+  for (let x = COLS - 1; x >= 0; x -= 1) {
+    tiles.push([x, 5]);
+  }
+  for (let x = 0; x <= COLS - 1; x += 1) {
+    tiles.push([x, 6]);
+  }
+  for (let x = COLS - 1; x >= 0; x -= 1) {
+    tiles.push([x, 7]);
+  }
+  for (let x = 0; x <= COLS - 1; x += 1) {
+    tiles.push([x, 8]);
+  }
+  for (let x = COLS - 1; x >= 0; x -= 1) {
+    tiles.push([x, 9]);
+  }
+  return tiles;
+}
+
+function pathCanyonL() {
+  const tiles = [];
+  for (let y = 0; y <= ROWS - 1; y += 1) {
+    tiles.push([0, y]);
+  }
+  for (let x = 1; x <= COLS - 1; x += 1) {
+    tiles.push([x, ROWS - 1]);
+  }
+  return tiles;
 }
 
 function buildMapLayout(mapName) {
   const maps = {
-    A: {
-      paths: [[
-        [8, 0], [7, 1], [6, 2], [5, 3], [4, 4],
-        [5, 4], [6, 4], [7, 4], [8, 4], [9, 4], [10, 4], [11, 4], [12, 4],
-        [11, 3], [10, 2], [9, 1], [8, 2], [8, 3], [8, 5], [8, 6], [8, 7], [8, 8], [8, 9]
-      ]]
+    serpent: {
+      paths: [pathSerpentFull()]
     },
-    Z: {
-      paths: [
-        [
-          [0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1], [9, 1], [10, 1], [11, 1], [12, 1], [13, 1], [14, 1], [15, 1], [16, 1],
-          [15, 2], [14, 3], [13, 4], [12, 5], [11, 6], [10, 7], [9, 8], [8, 9],
-          [9, 9], [10, 9], [11, 9], [12, 9], [13, 9], [14, 9], [15, 9], [16, 9]
-        ],
-        [
-          [0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1], [9, 1], [10, 1], [11, 1], [12, 1], [13, 1], [14, 1], [15, 1], [16, 1],
-          [16, 2], [16, 3], [15, 4], [14, 5], [13, 6], [12, 7], [11, 8], [10, 9],
-          [11, 9], [12, 9], [13, 9], [14, 9], [15, 9], [16, 9]
-        ]
-      ]
+    fork: (() => {
+      const fm = pathForkMergePaths();
+      return { paths: [fm.pathA, fm.pathB] };
+    })(),
+    spiral: {
+      paths: [pathSpiralPerimeter()]
     },
-    W: {
-      paths: [
-        [
-          [0, 2], [1, 2], [2, 2], [3, 2],
-          [4, 3], [5, 4], [6, 5], [7, 6],
-          [8, 5], [9, 4], [10, 3], [11, 2],
-          [12, 3], [13, 4], [14, 5], [15, 6], [16, 7]
-        ],
-        [
-          [0, 2], [1, 2], [2, 2], [3, 2],
-          [4, 1], [5, 1], [6, 2], [7, 3],
-          [8, 4], [9, 5], [10, 6], [11, 5],
-          [12, 4], [13, 5], [14, 6], [15, 7], [16, 7]
-        ]
-      ]
+    switchback: {
+      paths: [pathSwitchback()]
     },
-    P: {
-      paths: [[
-        [4, 9], [4, 8], [4, 7], [4, 6], [4, 5], [4, 4], [4, 3], [4, 2], [4, 1],
-        [5, 1], [6, 1], [7, 1], [8, 1], [9, 1], [10, 1], [11, 1], [12, 1],
-        [12, 2], [12, 3], [11, 3], [10, 3], [9, 3], [8, 3], [7, 3], [6, 3], [5, 3], [4, 3],
-        [8, 4], [8, 5], [8, 6], [8, 7], [8, 8], [8, 9]
-      ]]
+    canyon: {
+      paths: [pathCanyonL()]
     }
   };
 
-  const mapDef = maps[mapName] || maps.A;
+  const mapDef = maps[mapName] || maps.serpent;
   const allTiles = mapDef.paths.flat();
   const uniqueTiles = [];
   const seenTiles = new Set();
@@ -312,6 +463,7 @@ class Tower {
     this.targetMode = type.targetMode || "progress";
     this.color = type.color;
     this.barrelColor = type.barrelColor;
+    this.railSpeed = type.railSpeed ?? 0;
     this.cooldown = 0;
   }
 
@@ -337,6 +489,22 @@ class Tower {
     }
 
     this.cooldown = this.fireRate;
+
+    if (this.typeId === "rail") {
+      const dx = target.x - this.x;
+      const dy = target.y - this.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.001) {
+        return;
+      }
+      const dirX = dx / len;
+      const dirY = dy / len;
+      const startX = this.x + dirX * 22;
+      const startY = this.y + dirY * 22;
+      state.projectiles.push(new RailProjectile(startX, startY, dirX, dirY, this.railSpeed || 780, this.damage));
+      return;
+    }
+
     state.projectiles.push(new Projectile(this.x, this.y, target, {
       damage: this.damage,
       color: this.projectileColor,
@@ -356,6 +524,9 @@ class Tower {
     for (const enemy of state.enemies) {
       const dist = Math.hypot(enemy.x - this.x, enemy.y - this.y);
       if (dist > this.range) {
+        continue;
+      }
+      if (this.typeId === "ice" && enemy.slowTimer > 0) {
         continue;
       }
       const metric = this.targetMode === "highestHp" ? enemy.hp : enemy.pathIndex;
@@ -383,7 +554,12 @@ class Tower {
     ctx.fillStyle = this.color;
     ctx.fillRect(this.x - 14, this.y - 14, 28, 28);
     ctx.fillStyle = this.barrelColor;
-    ctx.fillRect(this.x - 4, this.y - 20, 8, 10);
+    if (this.typeId === "rail") {
+      ctx.fillRect(this.x - 16, this.y - 20, 32, 5);
+      ctx.fillRect(this.x - 3, this.y - 24, 6, 10);
+    } else {
+      ctx.fillRect(this.x - 4, this.y - 20, 8, 10);
+    }
   }
 }
 
@@ -467,6 +643,77 @@ class Projectile {
     ctx.beginPath();
     ctx.arc(this.x, this.y, 4, 0, Math.PI * 2);
     ctx.fill();
+  }
+}
+
+function segmentHitsCircle(x1, y1, x2, y2, cx, cy, r) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-8) {
+    return Math.hypot(cx - x1, cy - y1) <= r;
+  }
+  let t = ((cx - x1) * dx + (cy - y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const px = x1 + t * dx;
+  const py = y1 + t * dy;
+  return Math.hypot(cx - px, cy - py) <= r;
+}
+
+class RailProjectile {
+  constructor(sx, sy, dirX, dirY, speed, damage) {
+    this.x = sx;
+    this.y = sy;
+    this.prevX = sx;
+    this.prevY = sy;
+    this.dirX = dirX;
+    this.dirY = dirY;
+    this.speed = speed;
+    this.damage = damage;
+    this.hitEnemies = new Set();
+    this.done = false;
+  }
+
+  update(dt) {
+    this.prevX = this.x;
+    this.prevY = this.y;
+    this.x += this.dirX * this.speed * dt;
+    this.y += this.dirY * this.speed * dt;
+    for (const enemy of state.enemies) {
+      if (enemy.hp <= 0) {
+        continue;
+      }
+      if (this.hitEnemies.has(enemy)) {
+        continue;
+      }
+      if (segmentHitsCircle(this.prevX, this.prevY, this.x, this.y, enemy.x, enemy.y, enemy.radius + 3)) {
+        damageEnemy(enemy, this.damage, 0, 0);
+        this.hitEnemies.add(enemy);
+      }
+    }
+    if (this.x < -100 || this.x > canvas.width + 100 || this.y < -100 || this.y > canvas.height + 100) {
+      this.done = true;
+    }
+  }
+
+  draw() {
+    const bx = this.x - this.dirX * 120;
+    const by = this.y - this.dirY * 120;
+    const fx = this.x + this.dirX * 40;
+    const fy = this.y + this.dirY * 40;
+    ctx.strokeStyle = "rgba(251, 191, 36, 0.45)";
+    ctx.lineWidth = 8;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(fx, fy);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.prevX, this.prevY);
+    ctx.lineTo(this.x, this.y);
+    ctx.stroke();
   }
 }
 
@@ -827,19 +1074,54 @@ function update(dt) {
   }
 }
 
+function grassShade(x, y) {
+  const h = (x * 17 + y * 31) % 7;
+  if (h === 0 || h === 1) {
+    return GRASS_LIGHT;
+  }
+  if (h === 2 || h === 3) {
+    return GRASS_DARK;
+  }
+  return GRASS_BASE;
+}
+
 function drawGrid() {
+  const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  grad.addColorStop(0, "#1a4a38");
+  grad.addColorStop(0.5, "#143d2e");
+  grad.addColorStop(1, "#0f2e24");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
   for (let y = 0; y < ROWS; y += 1) {
     for (let x = 0; x < COLS; x += 1) {
       const px = x * TILE_SIZE;
       const py = y * TILE_SIZE;
       if (pathGrid[y][x] === 1) {
-        ctx.fillStyle = PATH_COLOR;
+        ctx.fillStyle = PATH_BASE;
+        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+        ctx.fillStyle = PATH_SHADOW;
+        ctx.fillRect(px, py + TILE_SIZE * 0.55, TILE_SIZE, TILE_SIZE * 0.45);
+        ctx.strokeStyle = "rgba(90, 60, 35, 0.35)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px + 4, py + TILE_SIZE * 0.45);
+        ctx.lineTo(px + TILE_SIZE - 4, py + TILE_SIZE * 0.45);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
+        ctx.fillRect(px + 2, py + 2, TILE_SIZE - 4, 4);
       } else {
-        ctx.fillStyle = "#14532d";
+        ctx.fillStyle = grassShade(x, y);
+        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.04)";
+        if ((x + y) % 2 === 0) {
+          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+        }
+        ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
+        ctx.fillRect(px + (x % 3) * 3, py + (y % 3) * 3, 2, 2);
       }
-      ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.12)";
       ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
     }
   }
@@ -909,6 +1191,44 @@ function getSharedPrefixLength(paths) {
     index += 1;
   }
   return index;
+}
+
+function drawSpawnIndicators() {
+  const t = performance.now() / 1000;
+  const pulse = 0.75 + 0.25 * Math.sin(t * 2.8);
+  for (const marker of spawnMarkers) {
+    const { x, y, angle } = marker;
+    ctx.strokeStyle = `rgba(34, 197, 94, ${0.55 + 0.25 * pulse})`;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.arc(x, y, 20, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = `rgba(34, 197, 94, ${0.12 * pulse})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = "bold 9px Arial";
+    ctx.textAlign = "center";
+    const labelY = y < 28 ? y + 32 : y - 23;
+    ctx.textBaseline = y < 28 ? "top" : "bottom";
+    ctx.fillStyle = "rgba(15, 23, 42, 0.6)";
+    ctx.fillText("SPAWN", x + 0.5, labelY + (y < 28 ? 0.5 : -0.5));
+    ctx.fillStyle = "rgba(187, 247, 208, 0.98)";
+    ctx.fillText("SPAWN", x, labelY);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.fillStyle = "#bbf7d0";
+    ctx.beginPath();
+    ctx.moveTo(14, 0);
+    ctx.lineTo(4, -5);
+    ctx.lineTo(4, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 function drawBase() {
@@ -1025,6 +1345,7 @@ function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid();
   drawPathArrows();
+  drawSpawnIndicators();
   drawBase();
   drawBuildHighlight();
   drawHoveredTowerRange();
@@ -1055,9 +1376,11 @@ function updateHud() {
     remainingEl.textContent = String(state.enemies.length + (state.enemiesToSpawnThisWave - state.enemiesSpawnedThisWave));
   }
   const basicCount = countTowersByType("basic");
+  const frostCount = countTowersByType("frost");
   const iceCount = countTowersByType("ice");
   const rocketCount = countTowersByType("rocket");
-  turretCountsEl.textContent = `Basic ${basicCount}, Ice ${iceCount}/3, Rocket ${rocketCount}/2`;
+  const railCount = countTowersByType("rail");
+  turretCountsEl.textContent = `Basic ${basicCount}, Frost ${frostCount}/3, Ice ${iceCount}, Rocket ${rocketCount}/2, Rail ${railCount}`;
 
   startWaveBtn.disabled = state.baseHp <= 0 || state.waveInProgress || state.gameWon || state.wave > FINAL_WAVE;
   rerollMapBtn.disabled = state.waveInProgress;
@@ -1140,6 +1463,9 @@ towerButtons.forEach((button) => {
       return;
     }
     const typeId = button.dataset.towerType;
+    if (!typeId || isTowerTypeAtCapacity(typeId)) {
+      return;
+    }
     state.sellMode = false;
     state.selectedTowerType = state.selectedTowerType === typeId ? null : typeId;
   });
@@ -1162,6 +1488,13 @@ fastForwardBtn.addEventListener("click", () => {
   state.fastForward = !state.fastForward;
 });
 sellModeBtn.addEventListener("click", () => {
+  toggleSellMode();
+});
+restartBtn.addEventListener("click", () => {
+  window.location.reload();
+});
+
+function toggleSellMode() {
   if (state.baseHp <= 0 || state.gameWon) {
     return;
   }
@@ -1169,9 +1502,41 @@ sellModeBtn.addEventListener("click", () => {
   if (state.sellMode) {
     state.selectedTowerType = null;
   }
-});
-restartBtn.addEventListener("click", () => {
-  window.location.reload();
+}
+
+function selectTowerByMenuIndex(index) {
+  if (state.baseHp <= 0 || state.gameWon) {
+    return;
+  }
+  const typeId = TOWER_MENU_ORDER[index];
+  if (!typeId || !TOWER_TYPES[typeId]) {
+    return;
+  }
+  if (isTowerTypeAtCapacity(typeId)) {
+    return;
+  }
+  state.sellMode = false;
+  state.selectedTowerType = state.selectedTowerType === typeId ? null : typeId;
+}
+
+window.addEventListener("keydown", (event) => {
+  const tag = event.target && event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    return;
+  }
+  if (state.baseHp <= 0 || state.gameWon) {
+    return;
+  }
+  if (event.code === "KeyF") {
+    event.preventDefault();
+    toggleSellMode();
+    return;
+  }
+  const key = event.key;
+  if (key >= "1" && key <= "5") {
+    event.preventDefault();
+    selectTowerByMenuIndex(Number.parseInt(key, 10) - 1);
+  }
 });
 
 requestAnimationFrame(gameLoop);

@@ -15,18 +15,17 @@
         <span>Gold: <strong id="gold">250</strong></span>
         <span>Base HP: <strong id="baseHp">20</strong></span>
         <span>Enemies Left: <strong id="remaining">0</strong></span>
-        <span>Turrets: <strong id="turretCounts">Basic 0, Ice 0/3, Rocket 0/2</strong></span>
+        <span>Turrets: <strong id="turretCounts">Basic 0, Frost 0/3, Ice 0, Rocket 0/2, Rail 0</strong></span>
       </div>
       <div class="controls">
         <button id="startWaveBtn" type="button">Start Wave</button>
-        <button id="rerollMapBtn" type="button">Reroll Map</button>
         <button id="restartLevelBtn" type="button">Restart Level</button>
         <button id="sellModeBtn" type="button">Sell Turret</button>
         <button id="fastForwardBtn" type="button">Fast Forward x2</button>
         <button id="restartBtn" class="restart-btn hidden" type="button">Restart Game</button>
       </div>
       <p class="tip">
-        Select a turret from the menu, then click a buildable tile to place it. Use Restart Level during a wave to try that wave again (keeps your towers and gold).
+        Select a turret from the menu, then click a buildable tile to place it. Keys <strong>1–5</strong> pick towers top to bottom; <strong>F</strong> toggles sell mode. Use Restart Level during a wave to try that wave again (keeps your towers and gold).
       </p>
     </section>
 
@@ -34,16 +33,23 @@
       <aside class="tower-panel">
         <h2>Tower Menu</h2>
         <div class="tower-menu" id="towerMenu">
-          <button class="tower-btn" data-tower-type="basic" type="button">Basic Turret (50g)</button>
-          <button class="tower-btn" data-tower-type="ice" type="button">Ice Turret (75g)</button>
-          <button class="tower-btn" data-tower-type="rocket" type="button">Rocket Turret (200g)</button>
+          <button class="tower-btn" data-tower-type="basic" type="button">Basic Turret (100g)</button>
+          <button class="tower-btn" data-tower-type="frost" type="button">Frost Tower (150g)</button>
+          <button class="tower-btn" data-tower-type="ice" type="button">Ice Turret (150g)</button>
+          <button class="tower-btn" data-tower-type="rocket" type="button">Rocket Turret (300g)</button>
+          <button class="tower-btn" data-tower-type="rail" type="button">Rail Gun Turret (400g)</button>
         </div>
       </aside>
 
-      <canvas id="gameCanvas" width="900" height="520" aria-label="Tower defense game area"></canvas>
+      <div class="game-stage">
+        <div class="game-stage-toolbar">
+          <button id="rerollMapBtn" type="button" class="reroll-map-btn">Reroll Map</button>
+        </div>
+        <canvas id="gameCanvas" width="900" height="520" aria-label="Tower defense game area"></canvas>
+      </div>
     </section>
   </main>
 
-  <script src="game.js?v=2"></script>
+  <script src="game.js?v=6"></script>
 </body>
 </html>
