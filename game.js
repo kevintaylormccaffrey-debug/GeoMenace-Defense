@@ -69,7 +69,7 @@ TOWER_TYPES.rocket.damage = Math.floor(TOWER_TYPES.basic.damage * 0.75);
 
 const state = {
   wave: 1,
-  gold: 100,
+  gold: 250,
   baseHp: 20,
   enemies: [],
   towers: [],
