@@ -10,6 +10,10 @@ const turretCountsEl = document.getElementById("turretCounts");
 const towerButtons = [...document.querySelectorAll(".tower-btn")];
 const startWaveBtn = document.getElementById("startWaveBtn");
 const rerollMapBtn = document.getElementById("rerollMapBtn");
+const startOverlayEl = document.getElementById("startOverlay");
+const beginGameBtn = document.getElementById("beginGameBtn");
+const mapCardsEl = document.getElementById("mapCards");
+const towerTooltipEl = document.getElementById("towerTooltip");
 const restartLevelBtn = document.getElementById("restartLevelBtn");
 const sellModeBtn = document.getElementById("sellModeBtn");
 const fastForwardBtn = document.getElementById("fastForwardBtn");
@@ -18,8 +22,6 @@ const restartBtn = document.getElementById("restartBtn");
 const TILE_SIZE = 52;
 const COLS = Math.floor(canvas.width / TILE_SIZE);
 const ROWS = Math.floor(canvas.height / TILE_SIZE);
-const PATH_BASE = "#c9a87a";
-const PATH_SHADOW = "#a67c52";
 const GRASS_BASE = "#1e4d3a";
 const GRASS_DARK = "#163828";
 const GRASS_LIGHT = "#2a6b4f";
@@ -30,6 +32,7 @@ const TOWER_TYPES = {
   basic: {
     id: "basic",
     name: "Basic Turret",
+    description: "Reliable single-target damage. Fires quick shots at the enemy farthest along the path.",
     cost: 100,
     range: 145,
     damage: 15,
@@ -43,18 +46,25 @@ const TOWER_TYPES = {
   frost: {
     id: "frost",
     name: "Frost Tower",
+    description: "Same punch as the basic turret with icy shots that slow enemies on hit. Limited to 3 towers.",
     cost: 150,
-    range: 130,
+    range: 145,
+    damage: 15,
+    fireRate: 1,
     color: "#0891b2",
     barrelColor: "#67e8f9",
-    aura: true,
+    projectileColor: "#a5f3fc",
+    targetMode: "progress",
+    projectileSpeed: 340,
     slowAmount: 0.25,
-    slowDuration: 0.2,
+    slowDuration: 1,
+    projectileStyle: "snowflake",
     maxCount: 3
   },
   ice: {
     id: "ice",
     name: "Ice Turret",
+    description: "Prioritizes enemies that are not slowed. Good for spreading chill without wasting shots.",
     cost: 150,
     range: 130,
     damage: 10,
@@ -71,10 +81,11 @@ const TOWER_TYPES = {
   rocket: {
     id: "rocket",
     name: "Rocket Turret",
+    description: "Splash damage aimed at the toughest foe in range. Limited to 2 towers.",
     cost: 300,
     range: 175,
-    damage: 20,
-    fireRate: 3,
+    damage: 25,
+    fireRate: 2,
     color: "#7c3aed",
     barrelColor: "#c4b5fd",
     projectileColor: "#f97316",
@@ -88,8 +99,9 @@ const TOWER_TYPES = {
   rail: {
     id: "rail",
     name: "Rail Gun Turret",
+    description: "Piercing beam that hits every enemy in a line. Prefers directions that tag the most targets. Extra damage vs. the boss.",
     cost: 400,
-    range: 175,
+    range: 350,
     damage: 30,
     fireRate: 4,
     color: "#475569",
@@ -98,6 +110,34 @@ const TOWER_TYPES = {
     railSpeed: 780
   }
 };
+
+const MAP_CATALOG = [
+  {
+    id: "serpent",
+    name: "Serpent",
+    blurb: "Long winding path across the map."
+  },
+  {
+    id: "fork",
+    name: "Fork",
+    blurb: "Two lanes merge before the base."
+  },
+  {
+    id: "spiral",
+    name: "Spiral",
+    blurb: "Tight spiral around the edges."
+  },
+  {
+    id: "switchback",
+    name: "Switchback",
+    blurb: "Horizontal rows that snake back and forth."
+  },
+  {
+    id: "canyon",
+    name: "Canyon",
+    blurb: "Vertical choke along the left wall."
+  }
+];
 
 const state = {
   wave: 1,
@@ -118,18 +158,23 @@ const state = {
   spawnTimer: 0,
   waveConfig: null,
   gameWon: false,
-  fastForward: false
+  fastForward: false,
+  difficultyHpMultiplier: 1,
+  gameStarted: false
 };
 
-const selectedMap = buildMapLayout(randomMapName());
-const pathGrid = createPathGrid(selectedMap.pathTiles);
-const mapPathOptions = selectedMap.paths.map((pathTiles) => toPixelPath(pathTiles));
-const endPoint = toPixelPoint(selectedMap.endTile);
-const buildableGrid = createBuildableGrid(pathGrid);
-const spawnMarkers = (() => {
+let selectedMap;
+let pathGrid;
+let pathLaneGrid;
+let mapPathOptions;
+let endPoint;
+let buildableGrid;
+let spawnMarkers;
+
+function computeSpawnMarkers(paths) {
   const list = [];
   const seen = new Set();
-  for (const path of mapPathOptions) {
+  for (const path of paths) {
     if (path.length < 1) {
       continue;
     }
@@ -144,11 +189,16 @@ const spawnMarkers = (() => {
     list.push({ x: p0.x, y: p0.y, angle });
   }
   return list;
-})();
+}
 
-function randomMapName() {
-  const mapNames = ["serpent", "fork", "spiral", "switchback", "canyon"];
-  return mapNames[Math.floor(Math.random() * mapNames.length)];
+function applyMapLayout(mapName) {
+  selectedMap = buildMapLayout(mapName);
+  pathGrid = createPathGrid(selectedMap.pathTiles);
+  pathLaneGrid = createPathLaneGrid(selectedMap.paths);
+  mapPathOptions = selectedMap.paths.map((pathTiles) => toPixelPath(pathTiles));
+  endPoint = toPixelPoint(selectedMap.endTile);
+  buildableGrid = createBuildableGrid(pathGrid);
+  spawnMarkers = computeSpawnMarkers(mapPathOptions);
 }
 
 function pathSerpentFull() {
@@ -330,6 +380,155 @@ function createPathGrid(pathTiles) {
     }
   }
   return grid;
+}
+
+const LANE_PALETTES = [
+  { base: "#e8b86a", deep: "#b8732d", edge: "rgba(120, 55, 20, 0.55)", highlight: "rgba(255, 250, 235, 0.14)" },
+  { base: "#6eb0d8", deep: "#2d6a8a", edge: "rgba(15, 60, 90, 0.55)", highlight: "rgba(230, 248, 255, 0.16)" },
+  { base: "#c9a0dc", deep: "#6b4589", edge: "rgba(45, 25, 70, 0.5)", highlight: "rgba(250, 240, 255, 0.14)" }
+];
+
+const PATH_MERGE = {
+  base: "#9a8b78",
+  deep: "#5c5248",
+  edge: "rgba(40, 32, 28, 0.65)",
+  stripeA: "rgba(255, 255, 255, 0.12)",
+  stripeB: "rgba(0, 0, 0, 0.08)"
+};
+
+function createPathLaneGrid(pathsAsTiles) {
+  const grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+  for (let pathIndex = 0; pathIndex < pathsAsTiles.length; pathIndex += 1) {
+    for (const tile of pathsAsTiles[pathIndex]) {
+      const x = tile[0];
+      const y = tile[1];
+      if (!inBounds(x, y)) {
+        continue;
+      }
+      const cell = grid[y][x];
+      if (cell === null) {
+        grid[y][x] = [pathIndex];
+      } else if (!cell.includes(pathIndex)) {
+        cell.push(pathIndex);
+      }
+    }
+  }
+  return grid;
+}
+
+function sortedLaneIds(cell) {
+  if (!cell || !cell.length) {
+    return [];
+  }
+  return [...new Set(cell)].sort((a, b) => a - b);
+}
+
+function drawPathTile(px, py, x, y) {
+  let lanes = sortedLaneIds(pathLaneGrid[y][x]);
+  if (lanes.length <= 0) {
+    lanes = [0];
+  }
+
+  if (lanes.length === 1) {
+    const pal = LANE_PALETTES[lanes[0] % LANE_PALETTES.length];
+    const g = ctx.createLinearGradient(px, py, px, py + TILE_SIZE);
+    g.addColorStop(0, pal.base);
+    g.addColorStop(0.55, pal.base);
+    g.addColorStop(1, pal.deep);
+    ctx.fillStyle = g;
+    ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+    ctx.fillStyle = pal.highlight;
+    ctx.fillRect(px + 3, py + 3, TILE_SIZE - 6, 5);
+    ctx.strokeStyle = pal.edge;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    return;
+  }
+
+  if (lanes.length === 2) {
+    const p0 = LANE_PALETTES[lanes[0] % LANE_PALETTES.length];
+    const p1 = LANE_PALETTES[lanes[1] % LANE_PALETTES.length];
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE);
+    ctx.lineTo(px, py + TILE_SIZE);
+    ctx.closePath();
+    const g0 = ctx.createLinearGradient(px, py, px + TILE_SIZE, py + TILE_SIZE);
+    g0.addColorStop(0, p0.base);
+    g0.addColorStop(1, p0.deep);
+    ctx.fillStyle = g0;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE);
+    ctx.lineTo(px + TILE_SIZE, py);
+    ctx.closePath();
+    const g1 = ctx.createLinearGradient(px + TILE_SIZE, py, px, py + TILE_SIZE);
+    g1.addColorStop(0, p1.base);
+    g1.addColorStop(1, p1.deep);
+    ctx.fillStyle = g1;
+    ctx.fill();
+    ctx.strokeStyle = PATH_MERGE.edge;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE);
+    ctx.stroke();
+    ctx.strokeStyle = p0.edge;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    return;
+  }
+
+  const mg = ctx.createLinearGradient(px, py, px, py + TILE_SIZE);
+  mg.addColorStop(0, PATH_MERGE.base);
+  mg.addColorStop(1, PATH_MERGE.deep);
+  ctx.fillStyle = mg;
+  ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+  ctx.fillStyle = PATH_MERGE.stripeA;
+  ctx.fillRect(px + 4, py + 8, TILE_SIZE - 8, 3);
+  ctx.fillStyle = PATH_MERGE.stripeB;
+  ctx.fillRect(px + 4, py + 16, TILE_SIZE - 8, 3);
+  ctx.strokeStyle = PATH_MERGE.edge;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+}
+
+function drawPathGrassDividers(px, py, x, y) {
+  const w = 2.5;
+  ctx.lineCap = "square";
+  const edge = (nx, ny, drawLine) => {
+    if (inBounds(nx, ny) && pathGrid[ny][nx] === 1) {
+      return;
+    }
+    drawLine();
+  };
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.42)";
+  ctx.lineWidth = w;
+  edge(x, y - 1, () => {
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + TILE_SIZE, py);
+    ctx.stroke();
+  });
+  edge(x, y + 1, () => {
+    ctx.beginPath();
+    ctx.moveTo(px, py + TILE_SIZE);
+    ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE);
+    ctx.stroke();
+  });
+  edge(x - 1, y, () => {
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px, py + TILE_SIZE);
+    ctx.stroke();
+  });
+  edge(x + 1, y, () => {
+    ctx.beginPath();
+    ctx.moveTo(px + TILE_SIZE, py);
+    ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE);
+    ctx.stroke();
+  });
 }
 
 function toPixelPoint(tile) {
@@ -518,6 +717,9 @@ class Tower {
   }
 
   findTarget() {
+    if (this.typeId === "rail") {
+      return this.findRailTarget();
+    }
     let best = null;
     let bestMetric = -1;
 
@@ -533,6 +735,41 @@ class Tower {
       if (metric > bestMetric) {
         best = enemy;
         bestMetric = metric;
+      }
+    }
+
+    return best;
+  }
+
+  findRailTarget() {
+    let best = null;
+    let bestCount = -1;
+    let bestTie = -1;
+
+    for (const enemy of state.enemies) {
+      if (enemy.hp <= 0) {
+        continue;
+      }
+      const dist = Math.hypot(enemy.x - this.x, enemy.y - this.y);
+      if (dist > this.range) {
+        continue;
+      }
+      const dx = enemy.x - this.x;
+      const dy = enemy.y - this.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.001) {
+        continue;
+      }
+      const dirX = dx / len;
+      const dirY = dy / len;
+      const startX = this.x + dirX * 22;
+      const startY = this.y + dirY * 22;
+      const cnt = countEnemiesOnRailLine(startX, startY, dirX, dirY, this.x, this.y, this.range);
+      const tie = enemy.pathIndex;
+      if (cnt > bestCount || (cnt === bestCount && tie > bestTie)) {
+        bestCount = cnt;
+        bestTie = tie;
+        best = enemy;
       }
     }
 
@@ -660,6 +897,25 @@ function segmentHitsCircle(x1, y1, x2, y2, cx, cy, r) {
   return Math.hypot(cx - px, cy - py) <= r;
 }
 
+function countEnemiesOnRailLine(startX, startY, dirX, dirY, towerX, towerY, range) {
+  const farX = startX + dirX * 4000;
+  const farY = startY + dirY * 4000;
+  let count = 0;
+  for (const enemy of state.enemies) {
+    if (enemy.hp <= 0) {
+      continue;
+    }
+    const d = Math.hypot(enemy.x - towerX, enemy.y - towerY);
+    if (d > range) {
+      continue;
+    }
+    if (segmentHitsCircle(startX, startY, farX, farY, enemy.x, enemy.y, enemy.radius + 3)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 class RailProjectile {
   constructor(sx, sy, dirX, dirY, speed, damage) {
     this.x = sx;
@@ -687,7 +943,8 @@ class RailProjectile {
         continue;
       }
       if (segmentHitsCircle(this.prevX, this.prevY, this.x, this.y, enemy.x, enemy.y, enemy.radius + 3)) {
-        damageEnemy(enemy, this.damage, 0, 0);
+        const dmg = enemy.isBoss ? this.damage * 1.5 : this.damage;
+        damageEnemy(enemy, dmg, 0, 0);
         this.hitEnemies.add(enemy);
       }
     }
@@ -752,7 +1009,7 @@ class ExplosionEffect {
 }
 
 function startWave() {
-  if (state.waveInProgress || state.baseHp <= 0 || state.gameWon || state.wave > FINAL_WAVE) {
+  if (!state.gameStarted || state.waveInProgress || state.baseHp <= 0 || state.gameWon || state.wave > FINAL_WAVE) {
     return;
   }
 
@@ -774,7 +1031,7 @@ function spawnEnemy() {
   const typeConfig = getEnemyTypeForWave(state.wave);
   const enemyConfig = {
     ...state.waveConfig,
-    hp: Math.floor(state.waveConfig.hp * typeConfig.hpMultiplier),
+    hp: Math.floor(state.waveConfig.hp * typeConfig.hpMultiplier * state.difficultyHpMultiplier),
     speed: state.waveConfig.speed * typeConfig.speedMultiplier,
     radius: typeConfig.radius ?? state.waveConfig.radius,
     color: typeConfig.color,
@@ -848,7 +1105,7 @@ function getWaveConfig(wave) {
       hp: 2700,
       speed: 54,
       spawnInterval: 1.2,
-      baseDamage: 12,
+      baseDamage: 5,
       radius: 39,
       isBoss: true,
       color: "#7f1d1d"
@@ -977,7 +1234,7 @@ function sellTower(tileX, tileY) {
 }
 
 function restartCurrentLevel() {
-  if (!state.waveInProgress || state.baseHp <= 0 || state.gameWon) {
+  if (!state.gameStarted || !state.waveInProgress || state.baseHp <= 0 || state.gameWon) {
     return;
   }
   state.enemies = [];
@@ -1043,6 +1300,9 @@ function update(dt) {
   for (const enemy of state.enemies) {
     if (enemy.reachedBase) {
       state.baseHp -= enemy.baseDamage;
+      if (state.baseHp <= 0) {
+        state.gameWon = false;
+      }
       continue;
     }
     if (enemy.hp <= 0) {
@@ -1061,9 +1321,11 @@ function update(dt) {
     state.waveConfig = null;
 
     if (completedWave >= FINAL_WAVE) {
-      state.gameWon = true;
-      state.selectedTowerType = null;
-      startWaveBtn.disabled = true;
+      if (state.baseHp > 0) {
+        state.gameWon = true;
+        state.selectedTowerType = null;
+        startWaveBtn.disabled = true;
+      }
       return;
     }
 
@@ -1087,9 +1349,9 @@ function grassShade(x, y) {
 
 function drawGrid() {
   const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  grad.addColorStop(0, "#1a4a38");
-  grad.addColorStop(0.5, "#143d2e");
-  grad.addColorStop(1, "#0f2e24");
+  grad.addColorStop(0, "#0f3026");
+  grad.addColorStop(0.5, "#0c281f");
+  grad.addColorStop(1, "#081c16");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1098,44 +1360,35 @@ function drawGrid() {
       const px = x * TILE_SIZE;
       const py = y * TILE_SIZE;
       if (pathGrid[y][x] === 1) {
-        ctx.fillStyle = PATH_BASE;
-        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        ctx.fillStyle = PATH_SHADOW;
-        ctx.fillRect(px, py + TILE_SIZE * 0.55, TILE_SIZE, TILE_SIZE * 0.45);
-        ctx.strokeStyle = "rgba(90, 60, 35, 0.35)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(px + 4, py + TILE_SIZE * 0.45);
-        ctx.lineTo(px + TILE_SIZE - 4, py + TILE_SIZE * 0.45);
-        ctx.stroke();
-        ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
-        ctx.fillRect(px + 2, py + 2, TILE_SIZE - 4, 4);
+        drawPathTile(px, py, x, y);
+        drawPathGrassDividers(px, py, x, y);
       } else {
         ctx.fillStyle = grassShade(x, y);
         ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        ctx.fillStyle = "rgba(0, 0, 0, 0.04)";
+        ctx.fillStyle = "rgba(0, 0, 0, 0.07)";
         if ((x + y) % 2 === 0) {
           ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
         }
-        ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.025)";
         ctx.fillRect(px + (x % 3) * 3, py + (y % 3) * 3, 2, 2);
       }
 
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.12)";
-      ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+      ctx.strokeStyle = pathGrid[y][x] === 1 ? "rgba(0, 0, 0, 0.18)" : "rgba(0, 0, 0, 0.2)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + 0.5, py + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     }
   }
 }
 
 function drawPathArrows() {
-  ctx.strokeStyle = "rgba(24, 26, 31, 0.3)";
-  ctx.fillStyle = "rgba(24, 26, 31, 0.3)";
-  ctx.lineWidth = 3;
   const sharedPrefixLength = getSharedPrefixLength(mapPathOptions);
 
-  for (const path of mapPathOptions) {
+  mapPathOptions.forEach((path, pathIndex) => {
+    const pal = LANE_PALETTES[pathIndex % LANE_PALETTES.length];
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
     if (path.length < 2) {
-      continue;
+      return;
     }
     const hasFork = mapPathOptions.length > 1 && sharedPrefixLength > 0;
     const baseSegIndex = hasFork ? Math.max(0, sharedPrefixLength) : Math.floor((path.length - 2) * 0.58);
@@ -1146,7 +1399,7 @@ function drawPathArrows() {
     const dy = to.y - from.y;
     const segLength = Math.hypot(dx, dy);
     if (segLength < 0.001) {
-      continue;
+      return;
     }
     const ux = dx / segLength;
     const uy = dy / segLength;
@@ -1160,6 +1413,17 @@ function drawPathArrows() {
     const startX = anchor.x - ux * shaftLength;
     const startY = anchor.y - uy * shaftLength;
 
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(anchor.x, anchor.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = pal.deep;
+    ctx.lineWidth = 3.5;
+    ctx.globalAlpha = 0.95;
     ctx.beginPath();
     ctx.moveTo(startX, startY);
     ctx.lineTo(anchor.x, anchor.y);
@@ -1167,13 +1431,24 @@ function drawPathArrows() {
 
     const px = -uy;
     const py = ux;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
     ctx.beginPath();
     ctx.moveTo(anchor.x, anchor.y);
     ctx.lineTo(anchor.x - ux * headLength + px * headLength * 0.65, anchor.y - uy * headLength + py * headLength * 0.65);
     ctx.lineTo(anchor.x - ux * headLength - px * headLength * 0.65, anchor.y - uy * headLength - py * headLength * 0.65);
     ctx.closePath();
     ctx.fill();
-  }
+
+    ctx.fillStyle = pal.deep;
+    ctx.globalAlpha = 0.95;
+    ctx.beginPath();
+    ctx.moveTo(anchor.x, anchor.y);
+    ctx.lineTo(anchor.x - ux * headLength + px * headLength * 0.65, anchor.y - uy * headLength + py * headLength * 0.65);
+    ctx.lineTo(anchor.x - ux * headLength - px * headLength * 0.65, anchor.y - uy * headLength - py * headLength * 0.65);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
 }
 
 function getSharedPrefixLength(paths) {
@@ -1297,7 +1572,7 @@ function drawSellCursorIndicator() {
 }
 
 function drawGameOver() {
-  if (state.baseHp > 0) {
+  if (state.baseHp > 0 || state.gameWon) {
     return;
   }
   ctx.fillStyle = "rgba(0,0,0,0.65)";
@@ -1311,7 +1586,7 @@ function drawGameOver() {
 }
 
 function drawVictoryScreen() {
-  if (!state.gameWon) {
+  if (!state.gameWon || state.baseHp <= 0) {
     return;
   }
   ctx.fillStyle = "rgba(0,0,0,0.68)";
@@ -1382,15 +1657,22 @@ function updateHud() {
   const railCount = countTowersByType("rail");
   turretCountsEl.textContent = `Basic ${basicCount}, Frost ${frostCount}/3, Ice ${iceCount}, Rocket ${rocketCount}/2, Rail ${railCount}`;
 
-  startWaveBtn.disabled = state.baseHp <= 0 || state.waveInProgress || state.gameWon || state.wave > FINAL_WAVE;
-  rerollMapBtn.disabled = state.waveInProgress;
+  startWaveBtn.disabled =
+    !state.gameStarted || state.baseHp <= 0 || state.waveInProgress || state.gameWon || state.wave > FINAL_WAVE;
+  if (rerollMapBtn) {
+    rerollMapBtn.disabled = !state.gameStarted || state.waveInProgress;
+  }
   restartLevelBtn.disabled =
-    state.baseHp <= 0 || state.gameWon || !state.waveInProgress || state.wave > FINAL_WAVE;
+    !state.gameStarted ||
+    state.baseHp <= 0 ||
+    state.gameWon ||
+    !state.waveInProgress ||
+    state.wave > FINAL_WAVE;
   restartBtn.classList.toggle("hidden", !(state.baseHp <= 0 || state.gameWon));
-  fastForwardBtn.disabled = state.baseHp <= 0 || state.gameWon;
+  fastForwardBtn.disabled = !state.gameStarted || state.baseHp <= 0 || state.gameWon;
   fastForwardBtn.classList.toggle("speed-btn-active", state.fastForward);
   fastForwardBtn.textContent = state.fastForward ? "Fast Forward x2 (On)" : "Fast Forward x2";
-  sellModeBtn.disabled = state.baseHp <= 0 || state.gameWon;
+  sellModeBtn.disabled = !state.gameStarted || state.baseHp <= 0 || state.gameWon;
   sellModeBtn.classList.toggle("sell-mode-active", state.sellMode);
   sellModeBtn.textContent = state.sellMode ? "Sell Turret (On)" : "Sell Turret";
 
@@ -1400,7 +1682,7 @@ function updateHud() {
     const isActive = state.selectedTowerType === typeId;
     button.classList.toggle("active", isActive);
     const atCap = type ? isTowerTypeAtCapacity(typeId) : false;
-    button.disabled = state.baseHp <= 0 || state.gameWon || !type || atCap;
+    button.disabled = !state.gameStarted || state.baseHp <= 0 || state.gameWon || !type || atCap;
     if (atCap && isActive) {
       state.selectedTowerType = null;
     }
@@ -1413,6 +1695,11 @@ function updateHud() {
 
 let previous = performance.now();
 function gameLoop(now) {
+  if (!state.gameStarted) {
+    updateHud();
+    requestAnimationFrame(gameLoop);
+    return;
+  }
   const dt = Math.min(0.033, (now - previous) / 1000);
   previous = now;
   const speedMultiplier = state.fastForward ? 2 : 1;
@@ -1426,6 +1713,9 @@ function gameLoop(now) {
 }
 
 canvas.addEventListener("mousemove", (event) => {
+  if (!state.gameStarted) {
+    return;
+  }
   const rect = canvas.getBoundingClientRect();
   const canvasX = (event.clientX - rect.left) / (rect.width / canvas.width);
   const canvasY = (event.clientY - rect.top) / (rect.height / canvas.height);
@@ -1441,7 +1731,7 @@ canvas.addEventListener("mouseleave", () => {
 });
 
 canvas.addEventListener("click", (event) => {
-  if (state.baseHp <= 0 || state.gameWon) {
+  if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
     return;
   }
   const rect = canvas.getBoundingClientRect();
@@ -1459,7 +1749,7 @@ canvas.addEventListener("click", (event) => {
 
 towerButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    if (state.baseHp <= 0 || state.gameWon) {
+    if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
       return;
     }
     const typeId = button.dataset.towerType;
@@ -1472,17 +1762,19 @@ towerButtons.forEach((button) => {
 });
 
 startWaveBtn.addEventListener("click", startWave);
-rerollMapBtn.addEventListener("click", () => {
-  if (state.waveInProgress) {
-    return;
-  }
-  window.location.reload();
-});
+if (rerollMapBtn) {
+  rerollMapBtn.addEventListener("click", () => {
+    if (state.waveInProgress) {
+      return;
+    }
+    window.location.reload();
+  });
+}
 restartLevelBtn.addEventListener("click", () => {
   restartCurrentLevel();
 });
 fastForwardBtn.addEventListener("click", () => {
-  if (state.baseHp <= 0 || state.gameWon) {
+  if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
     return;
   }
   state.fastForward = !state.fastForward;
@@ -1491,11 +1783,11 @@ sellModeBtn.addEventListener("click", () => {
   toggleSellMode();
 });
 restartBtn.addEventListener("click", () => {
-  window.location.reload();
+  openStartScreen();
 });
 
 function toggleSellMode() {
-  if (state.baseHp <= 0 || state.gameWon) {
+  if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
     return;
   }
   state.sellMode = !state.sellMode;
@@ -1505,7 +1797,7 @@ function toggleSellMode() {
 }
 
 function selectTowerByMenuIndex(index) {
-  if (state.baseHp <= 0 || state.gameWon) {
+  if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
     return;
   }
   const typeId = TOWER_MENU_ORDER[index];
@@ -1524,7 +1816,7 @@ window.addEventListener("keydown", (event) => {
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
     return;
   }
-  if (state.baseHp <= 0 || state.gameWon) {
+  if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
     return;
   }
   if (event.code === "KeyF") {
@@ -1538,5 +1830,151 @@ window.addEventListener("keydown", (event) => {
     selectTowerByMenuIndex(Number.parseInt(key, 10) - 1);
   }
 });
+
+let selectedMapIdForStart = null;
+
+function resetGameState() {
+  state.wave = 1;
+  state.gold = 250;
+  state.baseHp = 20;
+  state.enemies = [];
+  state.towers = [];
+  state.projectiles = [];
+  state.effects = [];
+  state.waveInProgress = false;
+  state.spawning = false;
+  state.hoveredTile = null;
+  state.selectedTowerType = null;
+  state.sellMode = false;
+  state.mouseCanvasPos = null;
+  state.enemiesSpawnedThisWave = 0;
+  state.enemiesToSpawnThisWave = 0;
+  state.spawnTimer = 0;
+  state.waveConfig = null;
+  state.gameWon = false;
+  state.fastForward = false;
+  state.difficultyHpMultiplier = 1;
+}
+
+function renderMapThumbnail(ctx2, mapName, w, h) {
+  const layout = buildMapLayout(mapName);
+  const pg = createPathGrid(layout.pathTiles);
+  const cw = w / COLS;
+  const ch = h / ROWS;
+  ctx2.fillStyle = "#081c16";
+  ctx2.fillRect(0, 0, w, h);
+  for (let y = 0; y < ROWS; y += 1) {
+    for (let x = 0; x < COLS; x += 1) {
+      ctx2.fillStyle = pg[y][x] ? "#e8b86a" : "#0f3026";
+      ctx2.fillRect(x * cw, y * ch, cw + 0.5, ch + 0.5);
+    }
+  }
+  ctx2.strokeStyle = "rgba(255, 255, 255, 0.2)";
+  ctx2.strokeRect(0.5, 0.5, w - 1, h - 1);
+}
+
+function refreshBeginButtonState() {
+  if (beginGameBtn) {
+    beginGameBtn.disabled = !selectedMapIdForStart;
+  }
+}
+
+function buildMapCards() {
+  if (!mapCardsEl) {
+    return;
+  }
+  mapCardsEl.innerHTML = "";
+  for (const map of MAP_CATALOG) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "map-card";
+    const thumb = document.createElement("canvas");
+    thumb.width = 140;
+    thumb.height = 80;
+    thumb.className = "map-thumb";
+    renderMapThumbnail(thumb.getContext("2d"), map.id, 140, 80);
+    const title = document.createElement("span");
+    title.className = "map-card-title";
+    title.textContent = map.name;
+    const sub = document.createElement("span");
+    sub.className = "map-card-blurb";
+    sub.textContent = map.blurb;
+    card.appendChild(thumb);
+    card.appendChild(title);
+    card.appendChild(sub);
+    card.addEventListener("click", () => {
+      selectedMapIdForStart = map.id;
+      mapCardsEl.querySelectorAll(".map-card").forEach((c) => c.classList.remove("selected"));
+      card.classList.add("selected");
+      refreshBeginButtonState();
+    });
+    mapCardsEl.appendChild(card);
+  }
+}
+
+function openStartScreen() {
+  state.gameStarted = false;
+  selectedMapIdForStart = null;
+  if (mapCardsEl) {
+    mapCardsEl.querySelectorAll(".map-card").forEach((c) => c.classList.remove("selected"));
+  }
+  resetGameState();
+  applyMapLayout("serpent");
+  refreshBeginButtonState();
+  if (startOverlayEl) {
+    startOverlayEl.classList.remove("hidden");
+  }
+}
+
+function setupTowerTooltips() {
+  if (!towerTooltipEl) {
+    return;
+  }
+  towerButtons.forEach((btn) => {
+    const typeId = btn.dataset.towerType;
+    const t = TOWER_TYPES[typeId];
+    if (!t || !t.description) {
+      return;
+    }
+    btn.addEventListener("mouseenter", () => {
+      towerTooltipEl.textContent = t.description;
+      towerTooltipEl.classList.remove("hidden");
+    });
+    btn.addEventListener("mousemove", (e) => {
+      towerTooltipEl.style.left = `${e.clientX + 14}px`;
+      towerTooltipEl.style.top = `${e.clientY + 14}px`;
+    });
+    btn.addEventListener("mouseleave", () => {
+      towerTooltipEl.classList.add("hidden");
+    });
+  });
+}
+
+function getSelectedDifficulty() {
+  const el = document.querySelector('input[name="difficulty"]:checked');
+  return el && el.value === "easy" ? "easy" : "normal";
+}
+
+if (beginGameBtn) {
+  beginGameBtn.addEventListener("click", () => {
+    if (!selectedMapIdForStart) {
+      return;
+    }
+    applyMapLayout(selectedMapIdForStart);
+    resetGameState();
+    state.difficultyHpMultiplier = getSelectedDifficulty() === "easy" ? 0.75 : 1;
+    state.gameStarted = true;
+    if (startOverlayEl) {
+      startOverlayEl.classList.add("hidden");
+    }
+  });
+}
+
+applyMapLayout("serpent");
+resetGameState();
+state.gameStarted = false;
+buildMapCards();
+refreshBeginButtonState();
+setupTowerTooltips();
 
 requestAnimationFrame(gameLoop);

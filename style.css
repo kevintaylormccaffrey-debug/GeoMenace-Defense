@@ -97,18 +97,175 @@ button:disabled {
   flex-direction: column;
 }
 
-.game-stage-toolbar {
+.start-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
   display: flex;
-  justify-content: flex-end;
   align-items: center;
-  margin-bottom: 8px;
-  min-height: 36px;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 12, 10, 0.92);
+  backdrop-filter: blur(6px);
 }
 
-.reroll-map-btn {
+.start-overlay.hidden {
+  display: none;
+}
+
+.start-card {
+  max-width: 720px;
+  width: 100%;
+  background: #141a22;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 24px 28px 28px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.start-title {
+  margin: 0 0 6px;
+  font-size: 1.75rem;
+  text-align: center;
+}
+
+.start-sub {
+  margin: 0 0 20px;
+  text-align: center;
+  opacity: 0.85;
+  font-size: 0.95rem;
+}
+
+.difficulty-field {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 12px 14px 14px;
+  margin: 0 0 20px;
+}
+
+.difficulty-field legend {
+  padding: 0 6px;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.difficulty-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.difficulty-option input {
+  margin-top: 3px;
+}
+
+.map-section-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.map-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 12px;
+}
+
+.map-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  background: #1e2630;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.map-card:hover {
+  border-color: rgba(96, 165, 250, 0.45);
+}
+
+.map-card.selected {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+.map-thumb {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  display: block;
+  background: #0f2e24;
+}
+
+.map-card-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.map-card-blurb {
+  font-size: 0.72rem;
+  line-height: 1.3;
+  opacity: 0.75;
+}
+
+.begin-btn {
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px 16px;
+  font-size: 1.05rem;
+  background: #059669;
+}
+
+.begin-btn:disabled {
   background: #475569;
-  font-size: 0.85rem;
-  padding: 6px 12px;
+}
+
+.tower-tooltip {
+  position: fixed;
+  z-index: 2000;
+  max-width: 280px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.tower-menu-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  opacity: 0.85;
+}
+
+.hint-bubble {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 800;
+  font-style: italic;
+  background: #334155;
+  color: #e2e8f0;
+  flex-shrink: 0;
 }
 
 .tower-panel {
