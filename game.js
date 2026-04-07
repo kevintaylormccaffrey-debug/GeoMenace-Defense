@@ -32,7 +32,8 @@ const TOWER_TYPES = {
   basic: {
     id: "basic",
     name: "Basic Turret",
-    description: "Reliable single-target damage. Fires quick shots at the enemy farthest along the path.",
+    description:
+      "Reliable single-target damage; shoots the enemy farthest along the path. Stats: 100g, range 145, 15 damage, 1s between shots, projectile speed 340, targets lead enemy. Max 6 towers.",
     cost: 100,
     range: 145,
     damage: 15,
@@ -41,12 +42,14 @@ const TOWER_TYPES = {
     barrelColor: "#93c5fd",
     projectileColor: "#fde047",
     targetMode: "progress",
-    projectileSpeed: 340
+    projectileSpeed: 340,
+    maxCount: 6
   },
   frost: {
     id: "frost",
     name: "Frost Tower",
-    description: "Same punch as the basic turret with icy shots that slow enemies on hit. Limited to 3 towers.",
+    description:
+      "Same damage cadence as Basic with icy shots that apply slow on hit. Stats: 150g, range 145, 15 damage, 1s between shots, projectile speed 340, 25% slow for 1s, snowflake shots. Max 3 towers.",
     cost: 150,
     range: 145,
     damage: 15,
@@ -64,7 +67,8 @@ const TOWER_TYPES = {
   ice: {
     id: "ice",
     name: "Ice Turret",
-    description: "Prioritizes enemies that are not slowed. Good for spreading chill without wasting shots.",
+    description:
+      "Prioritizes enemies that are not already slowed. Stats: 150g, range 130, 10 damage, 2s between shots, projectile speed 320, 25% slow for 1s, snowflake shots, targets lead enemy. Max 4 towers.",
     cost: 150,
     range: 130,
     damage: 10,
@@ -76,12 +80,14 @@ const TOWER_TYPES = {
     projectileSpeed: 320,
     slowAmount: 0.25,
     slowDuration: 1,
-    projectileStyle: "snowflake"
+    projectileStyle: "snowflake",
+    maxCount: 4
   },
   rocket: {
     id: "rocket",
     name: "Rocket Turret",
-    description: "Splash damage aimed at the toughest foe in range. Limited to 2 towers.",
+    description:
+      "Splash damage aimed at the highest-HP enemy in range. Stats: 300g, range 175, 25 damage, 2s between shots, projectile speed 290, 3-tile splash, targets highest HP. Max 2 towers.",
     cost: 300,
     range: 175,
     damage: 25,
@@ -99,7 +105,8 @@ const TOWER_TYPES = {
   rail: {
     id: "rail",
     name: "Rail Gun Turret",
-    description: "Piercing beam that hits every enemy in a line. Prefers directions that tag the most targets. Extra damage vs. the boss.",
+    description:
+      "Piercing beam through every enemy along a line; aims for the direction that hits the most targets. Stats: 400g, range 350, 30 damage per hit, 4s between shots, beam speed 780, 1.5× damage vs. boss. Max 2 towers.",
     cost: 400,
     range: 350,
     damage: 30,
@@ -107,7 +114,8 @@ const TOWER_TYPES = {
     color: "#475569",
     barrelColor: "#fbbf24",
     targetMode: "progress",
-    railSpeed: 780
+    railSpeed: 780,
+    maxCount: 2
   }
 };
 
@@ -1655,7 +1663,7 @@ function updateHud() {
   const iceCount = countTowersByType("ice");
   const rocketCount = countTowersByType("rocket");
   const railCount = countTowersByType("rail");
-  turretCountsEl.textContent = `Basic ${basicCount}, Frost ${frostCount}/3, Ice ${iceCount}, Rocket ${rocketCount}/2, Rail ${railCount}`;
+  turretCountsEl.textContent = `Basic ${basicCount}/6, Frost ${frostCount}/3, Ice ${iceCount}/4, Rocket ${rocketCount}/2, Rail ${railCount}/2`;
 
   startWaveBtn.disabled =
     !state.gameStarted || state.baseHp <= 0 || state.waveInProgress || state.gameWon || state.wave > FINAL_WAVE;
