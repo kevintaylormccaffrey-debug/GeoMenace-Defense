@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GeoMenace Defense</title>
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <audio id="menuMusic" src="assets/menu-theme.mp3" preload="auto" loop></audio>
@@ -78,6 +78,21 @@
     </section>
   </main>
 
-  <script src="game.js?v=18"></script>
+  <div class="audio-hud">
+    <button id="muteToggleBtn" type="button" class="audio-icon-btn" aria-label="Mute all audio" title="Mute all audio">🔊</button>
+    <button id="audioSettingsBtn" type="button" class="audio-icon-btn" aria-label="Audio settings" title="Audio settings">⚙️</button>
+    <div id="audioSettingsPanel" class="audio-settings-panel hidden">
+      <label class="audio-slider-row" for="sfxVolumeSlider">
+        <span id="sfxVolumeLabel">Game SFX: 5</span>
+        <input id="sfxVolumeSlider" type="range" min="1" max="10" value="5">
+      </label>
+      <label class="audio-slider-row" for="musicVolumeSlider">
+        <span id="musicVolumeLabel">Music: 5</span>
+        <input id="musicVolumeSlider" type="range" min="1" max="10" value="5">
+      </label>
+    </div>
+  </div>
+
+  <script src="game.js?v=20"></script>
 </body>
 </html>

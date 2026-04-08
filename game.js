@@ -20,6 +20,13 @@ const fastForwardBtn = document.getElementById("fastForwardBtn");
 const returnToMenuBtn = document.getElementById("returnToMenuBtn");
 const restartBtn = document.getElementById("restartBtn");
 const menuMusicEl = document.getElementById("menuMusic");
+const muteToggleBtn = document.getElementById("muteToggleBtn");
+const audioSettingsBtn = document.getElementById("audioSettingsBtn");
+const audioSettingsPanel = document.getElementById("audioSettingsPanel");
+const sfxVolumeSlider = document.getElementById("sfxVolumeSlider");
+const musicVolumeSlider = document.getElementById("musicVolumeSlider");
+const sfxVolumeLabel = document.getElementById("sfxVolumeLabel");
+const musicVolumeLabel = document.getElementById("musicVolumeLabel");
 const railShotSfx = new Audio("assets/rail-shot.mp3");
 const basicTurretShotSfx = new Audio("assets/basic_turret.mp3");
 const rocketTurretShotSfx = new Audio("assets/rocket_tower.mp3");
@@ -36,6 +43,15 @@ const BUILD_TILE_STROKE = "rgba(25, 70, 25, 0.38)";
 const BUILD_TILE_PATTERN = "rgba(255, 255, 255, 0.06)";
 const FINAL_WAVE = 10;
 const KILL_GOLD = 10;
+const AUDIO_MAX_LEVEL = 10;
+const BASE_MUSIC_VOLUME = 0.5;
+const BASE_SFX_VOLUME = {
+  rail: 0.45,
+  basic: 0.3,
+  rocket: 0.36,
+  ice: 0.32,
+  frostAura: 0.24
+};
 const TOWER_MENU_ORDER = ["basic", "ice", "frost", "rocket", "rail"];
 const TOWER_TYPES = {
   basic: {
@@ -166,15 +182,57 @@ const state = {
 };
 
 railShotSfx.preload = "auto";
-railShotSfx.volume = 0.45;
 basicTurretShotSfx.preload = "auto";
-basicTurretShotSfx.volume = 0.3;
 rocketTurretShotSfx.preload = "auto";
-rocketTurretShotSfx.volume = 0.36;
 iceTurretShotSfx.preload = "auto";
-iceTurretShotSfx.volume = 0.32;
 frostAuraSfx.preload = "auto";
-frostAuraSfx.volume = 0.24;
+const audioSettings = {
+  muted: false,
+  sfxLevel: 5,
+  musicLevel: 5
+};
+
+function clampAudioLevel(value) {
+  return Math.max(1, Math.min(AUDIO_MAX_LEVEL, value));
+}
+
+function getSfxMasterVolume() {
+  return audioSettings.muted ? 0 : audioSettings.sfxLevel / AUDIO_MAX_LEVEL;
+}
+
+function getMusicMasterVolume() {
+  return audioSettings.muted ? 0 : audioSettings.musicLevel / AUDIO_MAX_LEVEL;
+}
+
+function applyAudioVolumes() {
+  if (menuMusicEl) {
+    menuMusicEl.volume = BASE_MUSIC_VOLUME * getMusicMasterVolume();
+  }
+  railShotSfx.volume = BASE_SFX_VOLUME.rail * getSfxMasterVolume();
+  basicTurretShotSfx.volume = BASE_SFX_VOLUME.basic * getSfxMasterVolume();
+  rocketTurretShotSfx.volume = BASE_SFX_VOLUME.rocket * getSfxMasterVolume();
+  iceTurretShotSfx.volume = BASE_SFX_VOLUME.ice * getSfxMasterVolume();
+  frostAuraSfx.volume = BASE_SFX_VOLUME.frostAura * getSfxMasterVolume();
+}
+
+function refreshAudioHudUi() {
+  if (muteToggleBtn) {
+    muteToggleBtn.textContent = audioSettings.muted ? "🔇" : "🔊";
+    muteToggleBtn.setAttribute("aria-label", audioSettings.muted ? "Unmute all audio" : "Mute all audio");
+  }
+  if (sfxVolumeSlider) {
+    sfxVolumeSlider.value = String(audioSettings.sfxLevel);
+  }
+  if (musicVolumeSlider) {
+    musicVolumeSlider.value = String(audioSettings.musicLevel);
+  }
+  if (sfxVolumeLabel) {
+    sfxVolumeLabel.textContent = `Game SFX: ${audioSettings.sfxLevel}`;
+  }
+  if (musicVolumeLabel) {
+    musicVolumeLabel.textContent = `Music: ${audioSettings.musicLevel}`;
+  }
+}
 
 function playRailShotSfx() {
   // Clone to allow rapid overlapping rail shots without cutting prior sound.
@@ -239,6 +297,16 @@ let mapPathOptions;
 let endPoint;
 let buildableGrid;
 let spawnMarkers;
+
+const snakeMapBg = new Image();
+let snakeMapBgLoaded = false;
+snakeMapBg.onload = () => {
+  snakeMapBgLoaded = true;
+};
+snakeMapBg.onerror = () => {
+  snakeMapBgLoaded = false;
+};
+snakeMapBg.src = "assets/snake-map-bg.png";
 
 function computeSpawnMarkers(paths) {
   const list = [];
@@ -346,17 +414,33 @@ function dedupeConsecutiveTiles(tiles) {
 
 function pathSnakeS() {
   const tiles = [];
-  for (let y = 0; y < ROWS; y += 1) {
-    if (y % 2 === 0) {
-      for (let x = 0; x <= COLS - 1; x += 1) {
-        tiles.push([x, y]);
-      }
-    } else {
-      for (let x = COLS - 1; x >= 0; x -= 1) {
-        tiles.push([x, y]);
-      }
+  const add = (x, y) => {
+    const last = tiles[tiles.length - 1];
+    if (!last || last[0] !== x || last[1] !== y) {
+      tiles.push([x, y]);
     }
-  }
+  };
+  const h = (y, x0, x1) => {
+    const s = x0 <= x1 ? 1 : -1;
+    for (let x = x0; s > 0 ? x <= x1 : x >= x1; x += s) {
+      add(x, y);
+    }
+  };
+  const v = (x, y0, y1) => {
+    const s = y0 <= y1 ? 1 : -1;
+    for (let y = y0; s > 0 ? y <= y1 : y >= y1; y += s) {
+      add(x, y);
+    }
+  };
+  h(0, 2, 14);
+  v(14, 1, 2);
+  h(2, 14, 4);
+  v(4, 3, 5);
+  h(5, 5, 12);
+  v(12, 6, 7);
+  h(7, 12, 6);
+  v(6, 7, 9);
+  h(9, 7, 15);
   return dedupeConsecutiveTiles(tiles);
 }
 
@@ -548,6 +632,120 @@ function drawPathGrassDividers(px, py, x, y) {
     ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE);
     ctx.stroke();
   });
+}
+
+function drawSnakePathGrassDividers(px, py, x, y) {
+  const w = 2;
+  ctx.lineCap = "square";
+  const edge = (nx, ny, drawLine) => {
+    if (inBounds(nx, ny) && pathGrid[ny][nx] === 1) {
+      return;
+    }
+    drawLine();
+  };
+  ctx.strokeStyle = "rgba(14, 52, 14, 0.55)";
+  ctx.lineWidth = w;
+  edge(x, y - 1, () => {
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + TILE_SIZE, py);
+    ctx.stroke();
+  });
+  edge(x, y + 1, () => {
+    ctx.beginPath();
+    ctx.moveTo(px, py + TILE_SIZE);
+    ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE);
+    ctx.stroke();
+  });
+  edge(x - 1, y, () => {
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px, py + TILE_SIZE);
+    ctx.stroke();
+  });
+  edge(x + 1, y, () => {
+    ctx.beginPath();
+    ctx.moveTo(px + TILE_SIZE, py);
+    ctx.lineTo(px + TILE_SIZE, py + TILE_SIZE);
+    ctx.stroke();
+  });
+}
+
+function drawSnakeStonePathTile(px, py, x, y) {
+  const inset = 3;
+  const g = ctx.createLinearGradient(px, py, px, py + TILE_SIZE);
+  g.addColorStop(0, "#d4d2c8");
+  g.addColorStop(0.45, "#b8b6ae");
+  g.addColorStop(1, "#8e8c86");
+  ctx.fillStyle = g;
+  ctx.fillRect(px + inset, py + inset, TILE_SIZE - inset * 2, TILE_SIZE - inset * 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.14)";
+  ctx.fillRect(px + inset + 2, py + inset + 2, TILE_SIZE - inset * 2 - 10, 4);
+  ctx.strokeStyle = "rgba(55, 52, 46, 0.5)";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(px + inset + 0.5, py + inset + 0.5, TILE_SIZE - inset * 2 - 1, TILE_SIZE - inset * 2 - 1);
+  const seed = (x * 19 + y * 29) % 5;
+  if (seed === 1) {
+    ctx.fillStyle = "rgba(90, 88, 82, 0.25)";
+    ctx.beginPath();
+    ctx.arc(px + TILE_SIZE * 0.35, py + TILE_SIZE * 0.55, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (seed === 3) {
+    ctx.fillStyle = "rgba(70, 68, 62, 0.2)";
+    ctx.fillRect(px + TILE_SIZE * 0.55, py + TILE_SIZE * 0.35, 5, 4);
+  }
+}
+
+function drawSnakeGrassTile(px, py, x, y) {
+  ctx.fillStyle = grassShade(x, y);
+  ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+  ctx.strokeStyle = "rgba(10, 48, 10, 0.4)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px + 0.5, py + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+  const seed = (x * 31 + y * 17) % 13;
+  if (seed === 0 || seed === 4) {
+    ctx.fillStyle = "#1a5c32";
+    ctx.beginPath();
+    ctx.arc(px + TILE_SIZE * 0.38, py + TILE_SIZE * 0.36, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#2d8f4a";
+    ctx.beginPath();
+    ctx.arc(px + TILE_SIZE * 0.42, py + TILE_SIZE * 0.32, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (seed === 8) {
+    ctx.fillStyle = "#5a6b5e";
+    ctx.fillRect(px + 20, py + 20, 6, 5);
+  } else if (seed === 6) {
+    ctx.fillStyle = "#f0faf0";
+    ctx.fillRect(px + 28, py + 26, 2, 2);
+    ctx.fillRect(px + 32, py + 24, 2, 2);
+  }
+  const inset = 6;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 4]);
+  ctx.strokeRect(px + inset, py + inset, TILE_SIZE - inset * 2, TILE_SIZE - inset * 2);
+  ctx.setLineDash([]);
+}
+
+function drawSnakeMapLabels() {
+  if (!selectedMap || selectedMap.mapName !== "snake" || !selectedMap.paths[0] || !selectedMap.paths[0].length) {
+    return;
+  }
+  const start = toPixelPoint(selectedMap.paths[0][0]);
+  const end = endPoint;
+  const endLabelY = end.y - 26;
+  ctx.font = "bold 11px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(0, 50, 0, 0.88)";
+  ctx.fillRect(start.x - 26, start.y - 11, 52, 20);
+  ctx.fillStyle = "#f8faf8";
+  ctx.fillText("START", start.x, start.y);
+  ctx.fillStyle = "rgba(0, 58, 0, 0.88)";
+  ctx.fillRect(end.x - 22, endLabelY - 10, 44, 20);
+  ctx.fillStyle = "#f8faf8";
+  ctx.fillText("END", end.x, endLabelY);
 }
 
 function toPixelPoint(tile) {
@@ -1480,17 +1678,40 @@ function drawBuildableGrassTile(px, py, x, y) {
 }
 
 function drawGrid() {
-  const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  grad.addColorStop(0, "#5f9448");
-  grad.addColorStop(0.45, "#528a3e");
-  grad.addColorStop(1, "#447030");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const isSnake = selectedMap && selectedMap.mapName === "snake";
+  if (isSnake && snakeMapBgLoaded && snakeMapBg.complete) {
+    ctx.drawImage(snakeMapBg, 0, 0, canvas.width, canvas.height);
+  } else {
+    const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    grad.addColorStop(0, "#5f9448");
+    grad.addColorStop(0.45, "#528a3e");
+    grad.addColorStop(1, "#447030");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   for (let y = 0; y < ROWS; y += 1) {
     for (let x = 0; x < COLS; x += 1) {
       const px = x * TILE_SIZE;
       const py = y * TILE_SIZE;
+      if (isSnake) {
+        if (pathGrid[y][x] === 1) {
+          drawSnakeStonePathTile(px, py, x, y);
+          drawSnakePathGrassDividers(px, py, x, y);
+        } else {
+          ctx.save();
+          if (snakeMapBgLoaded && snakeMapBg.complete) {
+            ctx.globalAlpha = 0.82;
+          }
+          drawSnakeGrassTile(px, py, x, y);
+          ctx.restore();
+        }
+        ctx.strokeStyle =
+          pathGrid[y][x] === 1 ? "rgba(55, 52, 46, 0.35)" : "rgba(18, 62, 18, 0.42)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(px + 0.5, py + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+        continue;
+      }
       if (pathGrid[y][x] === 1) {
         drawPathTile(px, py, x, y);
         drawPathGrassDividers(px, py, x, y);
@@ -1765,6 +1986,7 @@ function draw() {
   drawPathArrows();
   drawSpawnIndicators();
   drawBase();
+  drawSnakeMapLabels();
   drawBuildHighlight();
   drawHoveredTowerRange();
   for (const tower of state.towers) {
@@ -1996,21 +2218,12 @@ function playMenuMusic() {
   if (!menuMusicEl) {
     return;
   }
-  menuMusicEl.volume = 0.5;
   const playAttempt = menuMusicEl.play();
   if (playAttempt && typeof playAttempt.catch === "function") {
     playAttempt.catch(() => {
       // Autoplay can be blocked until user gesture; we retry after interaction.
     });
   }
-}
-
-function stopMenuMusic() {
-  if (!menuMusicEl) {
-    return;
-  }
-  menuMusicEl.pause();
-  menuMusicEl.currentTime = 0;
 }
 
 function bindMenuMusicUnlock() {
@@ -2027,6 +2240,36 @@ function bindMenuMusicUnlock() {
   };
   document.addEventListener("pointerdown", unlock);
   document.addEventListener("keydown", unlock);
+}
+
+function setupAudioControls() {
+  refreshAudioHudUi();
+  if (muteToggleBtn) {
+    muteToggleBtn.addEventListener("click", () => {
+      audioSettings.muted = !audioSettings.muted;
+      applyAudioVolumes();
+      refreshAudioHudUi();
+    });
+  }
+  if (audioSettingsBtn && audioSettingsPanel) {
+    audioSettingsBtn.addEventListener("click", () => {
+      audioSettingsPanel.classList.toggle("hidden");
+    });
+  }
+  if (sfxVolumeSlider) {
+    sfxVolumeSlider.addEventListener("input", () => {
+      audioSettings.sfxLevel = clampAudioLevel(Number.parseInt(sfxVolumeSlider.value, 10) || 5);
+      applyAudioVolumes();
+      refreshAudioHudUi();
+    });
+  }
+  if (musicVolumeSlider) {
+    musicVolumeSlider.addEventListener("input", () => {
+      audioSettings.musicLevel = clampAudioLevel(Number.parseInt(musicVolumeSlider.value, 10) || 5);
+      applyAudioVolumes();
+      refreshAudioHudUi();
+    });
+  }
 }
 
 function resetGameState() {
@@ -2174,7 +2417,6 @@ if (beginGameBtn) {
     resetGameState();
     state.difficultyHpMultiplier = getSelectedDifficulty() === "easy" ? 0.75 : 1;
     state.gameStarted = true;
-    stopMenuMusic();
     if (startOverlayEl) {
       startOverlayEl.classList.add("hidden");
     }
@@ -2186,6 +2428,8 @@ resetGameState();
 state.gameStarted = false;
 buildMapCards();
 setupTowerTooltips();
+setupAudioControls();
+applyAudioVolumes();
 bindMenuMusicUnlock();
 playMenuMusic();
 
