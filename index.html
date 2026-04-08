@@ -3,14 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Basic Tower Defense</title>
-  <link rel="stylesheet" href="style.css">
+  <title>GeoMenace Defense</title>
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
+  <audio id="menuMusic" src="assets/menu-theme.mp3" preload="auto" loop></audio>
   <div id="startOverlay" class="start-overlay">
     <div class="start-card">
       <h1 class="start-title">GeoMenace Defense</h1>
-      <p class="start-sub">Choose difficulty and a map, then begin.</p>
+      <p class="start-sub">Choose a map and difficulty, then begin.</p>
 
       <fieldset class="difficulty-field">
         <legend>Difficulty</legend>
@@ -37,23 +38,24 @@
 
   <main class="app">
     <section class="hud">
-      <h1>Basic Tower Defense</h1>
+      <h1>GeoMenace Defense</h1>
       <div class="stats">
         <span>Wave: <strong id="wave">1</strong></span>
         <span>Gold: <strong id="gold">250</strong></span>
         <span>Base HP: <strong id="baseHp">20</strong></span>
         <span>Enemies Left: <strong id="remaining">0</strong></span>
-        <span>Turrets: <strong id="turretCounts">Basic 0/6, Frost 0/3, Ice 0/4, Rocket 0/2, Rail 0/2</strong></span>
+        <span>Turrets: <strong id="turretCounts">Basic 0/6, Ice 0/4, Frost 0/3, Rocket 0/2, Rail 0/2</strong></span>
       </div>
       <div class="controls">
         <button id="startWaveBtn" type="button">Start Wave</button>
         <button id="restartLevelBtn" type="button">Restart Level</button>
         <button id="sellModeBtn" type="button">Sell Turret</button>
-        <button id="fastForwardBtn" type="button">Fast Forward x2</button>
+        <button id="fastForwardBtn" type="button">Game speed: ×1</button>
+        <button id="returnToMenuBtn" type="button" class="return-menu-btn">Return to Main Menu</button>
         <button id="restartBtn" class="restart-btn hidden" type="button">Restart Game</button>
       </div>
       <p class="tip">
-        Select a turret from the menu, then click a buildable tile to place it. Keys <strong>1–5</strong> pick towers top to bottom; <strong>F</strong> toggles sell mode. Use Restart Level during a wave to try that wave again (keeps your towers and gold).
+        Select a turret from the menu, then click a buildable tile to place it. Keys <strong>1–5</strong> pick towers top to bottom; <strong>F</strong> toggles sell mode; <strong>Space</strong> starts the wave. Game speed cycles ×1 → ×2 → ×4 on the speed button. Use Restart Level during a wave to try that wave again (keeps your towers and gold).
       </p>
     </section>
 
@@ -63,19 +65,19 @@
         <p class="tower-menu-hint"><span class="hint-bubble" aria-hidden="true">i</span> Hover a tower for full stats and behavior.</p>
         <div class="tower-menu" id="towerMenu">
           <button class="tower-btn" data-tower-type="basic" type="button">Basic Turret (100g)</button>
-          <button class="tower-btn" data-tower-type="frost" type="button">Frost Tower (150g)</button>
           <button class="tower-btn" data-tower-type="ice" type="button">Ice Turret (150g)</button>
+          <button class="tower-btn" data-tower-type="frost" type="button">Frost Aura Tower (150g)</button>
           <button class="tower-btn" data-tower-type="rocket" type="button">Rocket Turret (300g)</button>
           <button class="tower-btn" data-tower-type="rail" type="button">Rail Gun Turret (400g)</button>
         </div>
       </aside>
 
       <div class="game-stage">
-        <canvas id="gameCanvas" width="900" height="520" aria-label="Tower defense game area"></canvas>
+        <canvas id="gameCanvas" width="900" height="520" aria-label="GeoMenace Defense game area"></canvas>
       </div>
     </section>
   </main>
 
-  <script src="game.js?v=9"></script>
+  <script src="game.js?v=18"></script>
 </body>
 </html>

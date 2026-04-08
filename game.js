@@ -17,23 +17,32 @@ const towerTooltipEl = document.getElementById("towerTooltip");
 const restartLevelBtn = document.getElementById("restartLevelBtn");
 const sellModeBtn = document.getElementById("sellModeBtn");
 const fastForwardBtn = document.getElementById("fastForwardBtn");
+const returnToMenuBtn = document.getElementById("returnToMenuBtn");
 const restartBtn = document.getElementById("restartBtn");
+const menuMusicEl = document.getElementById("menuMusic");
+const railShotSfx = new Audio("assets/rail-shot.mp3");
+const basicTurretShotSfx = new Audio("assets/basic_turret.mp3");
+const rocketTurretShotSfx = new Audio("assets/rocket_tower.mp3");
+const iceTurretShotSfx = new Audio("assets/ice_turret.mp3");
+const frostAuraSfx = new Audio("assets/frost_aura.mp3");
 
 const TILE_SIZE = 52;
 const COLS = Math.floor(canvas.width / TILE_SIZE);
 const ROWS = Math.floor(canvas.height / TILE_SIZE);
-const GRASS_BASE = "#1e4d3a";
-const GRASS_DARK = "#163828";
-const GRASS_LIGHT = "#2a6b4f";
+const GRASS_BASE = "#5a8f46";
+const GRASS_DARK = "#4a7a3a";
+const GRASS_LIGHT = "#6fb050";
+const BUILD_TILE_STROKE = "rgba(25, 70, 25, 0.38)";
+const BUILD_TILE_PATTERN = "rgba(255, 255, 255, 0.06)";
 const FINAL_WAVE = 10;
 const KILL_GOLD = 10;
-const TOWER_MENU_ORDER = ["basic", "frost", "ice", "rocket", "rail"];
+const TOWER_MENU_ORDER = ["basic", "ice", "frost", "rocket", "rail"];
 const TOWER_TYPES = {
   basic: {
     id: "basic",
     name: "Basic Turret",
     description:
-      "Reliable single-target damage; shoots the enemy farthest along the path. Stats: 100g, range 145, 15 damage, 1s between shots, projectile speed 340, targets lead enemy. Max 6 towers.",
+      "Reliable single-target damage; shoots the enemy farthest along the path.\nStats:\nCost: 100g,\nRange: 145,\nDamage: 15,\nShot Interval: 1s,\nProjectile speed 340,\nTarget Prio: Lead enemy.\nMax 6 towers.",
     cost: 100,
     range: 145,
     damage: 15,
@@ -47,28 +56,23 @@ const TOWER_TYPES = {
   },
   frost: {
     id: "frost",
-    name: "Frost Tower",
+    name: "Frost Aura Tower",
     description:
-      "Same damage cadence as Basic with icy shots that apply slow on hit. Stats: 150g, range 145, 15 damage, 1s between shots, projectile speed 340, 25% slow for 1s, snowflake shots. Max 3 towers.",
+      "Continuous aura: Enemies inside the ring are slowed by 25%. Ice Turret snowflakes that hit an enemy inside any Frost Aura apply 35% slow instead of 25%.\nStats:\nCost: 150g,\nRange: 145,\nAura slow: 25% (always on in range),\nSynergy: Ice hits in aura → 35% slow,\nNo shots — aura only.\nMax 3 towers.",
     cost: 150,
     range: 145,
-    damage: 15,
-    fireRate: 1,
     color: "#0891b2",
     barrelColor: "#67e8f9",
-    projectileColor: "#a5f3fc",
-    targetMode: "progress",
-    projectileSpeed: 340,
+    aura: true,
     slowAmount: 0.25,
-    slowDuration: 1,
-    projectileStyle: "snowflake",
+    slowDuration: 0.22,
     maxCount: 3
   },
   ice: {
     id: "ice",
     name: "Ice Turret",
     description:
-      "Prioritizes enemies that are not already slowed. Stats: 150g, range 130, 10 damage, 2s between shots, projectile speed 320, 25% slow for 1s, snowflake shots, targets lead enemy. Max 4 towers.",
+      "Snowflake shots; skips enemies recently hit by Ice (spreads chill). In a Frost Aura, hits apply 35% slow instead of 25%.\nStats:\nCost: 150g,\nRange: 130,\nDamage: 10,\nShot Interval: 2s,\nProjectile speed 320,\nOn hit: 25% slow for 1s (35% in Frost Aura),\nTarget Prio: Lead enemy without recent Ice hit.\nMax 4 towers.",
     cost: 150,
     range: 130,
     damage: 10,
@@ -87,7 +91,7 @@ const TOWER_TYPES = {
     id: "rocket",
     name: "Rocket Turret",
     description:
-      "Splash damage aimed at the highest-HP enemy in range. Stats: 300g, range 175, 25 damage, 2s between shots, projectile speed 290, 3-tile splash, targets highest HP. Max 2 towers.",
+      "Splash damage aimed at the highest-HP enemy in range.\nStats:\nCost: 300g,\nRange: 175,\nDamage: 25,\nShot Interval: 2s,\nProjectile speed 290,\nSplash: 3 tiles,\nTarget Prio: Highest HP.\nMax 2 towers.",
     cost: 300,
     range: 175,
     damage: 25,
@@ -106,44 +110,34 @@ const TOWER_TYPES = {
     id: "rail",
     name: "Rail Gun Turret",
     description:
-      "Piercing beam through every enemy along a line; aims for the direction that hits the most targets. Stats: 400g, range 350, 30 damage per hit, 4s between shots, beam speed 780, 1.5× damage vs. boss. Max 2 towers.",
+      "Piercing beam through every enemy along a line; aims for the direction that hits the most targets.\nStats:\nCost: 400g,\nRange: 350,\nDamage: 45 per hit,\nShot Interval: 4s,\nBeam speed: 1000,\nBonus vs boss: 1.5×,\nBonus vs square enemies: 1.5×,\nTarget Prio: Most enemies on line.\nMax 2 towers.",
     cost: 400,
     range: 350,
-    damage: 30,
+    damage: 45,
     fireRate: 4,
     color: "#475569",
     barrelColor: "#fbbf24",
     targetMode: "progress",
-    railSpeed: 780,
+    railSpeed: 1000,
     maxCount: 2
   }
 };
 
 const MAP_CATALOG = [
   {
-    id: "serpent",
-    name: "Serpent",
-    blurb: "Long winding path across the map."
-  },
-  {
     id: "fork",
-    name: "Fork",
+    name: "Fork Map",
     blurb: "Two lanes merge before the base."
   },
   {
-    id: "spiral",
-    name: "Spiral",
-    blurb: "Tight spiral around the edges."
+    id: "trident",
+    name: "Trident",
+    blurb: "Three top spawns funnel into one lane to the base."
   },
   {
-    id: "switchback",
-    name: "Switchback",
-    blurb: "Horizontal rows that snake back and forth."
-  },
-  {
-    id: "canyon",
-    name: "Canyon",
-    blurb: "Vertical choke along the left wall."
+    id: "snake",
+    name: "Snake",
+    blurb: "S-shaped path from top to bottom."
   }
 ];
 
@@ -166,10 +160,77 @@ const state = {
   spawnTimer: 0,
   waveConfig: null,
   gameWon: false,
-  fastForward: false,
+  speedMultiplier: 1,
   difficultyHpMultiplier: 1,
   gameStarted: false
 };
+
+railShotSfx.preload = "auto";
+railShotSfx.volume = 0.45;
+basicTurretShotSfx.preload = "auto";
+basicTurretShotSfx.volume = 0.3;
+rocketTurretShotSfx.preload = "auto";
+rocketTurretShotSfx.volume = 0.36;
+iceTurretShotSfx.preload = "auto";
+iceTurretShotSfx.volume = 0.32;
+frostAuraSfx.preload = "auto";
+frostAuraSfx.volume = 0.24;
+
+function playRailShotSfx() {
+  // Clone to allow rapid overlapping rail shots without cutting prior sound.
+  const sfx = railShotSfx.cloneNode();
+  sfx.volume = railShotSfx.volume;
+  const attempt = sfx.play();
+  if (attempt && typeof attempt.catch === "function") {
+    attempt.catch(() => {
+      // Ignore autoplay/user-gesture rejections for SFX.
+    });
+  }
+}
+
+function playBasicTurretShotSfx() {
+  const sfx = basicTurretShotSfx.cloneNode();
+  sfx.volume = basicTurretShotSfx.volume;
+  const attempt = sfx.play();
+  if (attempt && typeof attempt.catch === "function") {
+    attempt.catch(() => {
+      // Ignore autoplay/user-gesture rejections for SFX.
+    });
+  }
+}
+
+function playRocketTurretShotSfx() {
+  const sfx = rocketTurretShotSfx.cloneNode();
+  sfx.volume = rocketTurretShotSfx.volume;
+  const attempt = sfx.play();
+  if (attempt && typeof attempt.catch === "function") {
+    attempt.catch(() => {
+      // Ignore autoplay/user-gesture rejections for SFX.
+    });
+  }
+}
+
+function playIceTurretShotSfx() {
+  const sfx = iceTurretShotSfx.cloneNode();
+  sfx.volume = iceTurretShotSfx.volume;
+  const attempt = sfx.play();
+  if (attempt && typeof attempt.catch === "function") {
+    attempt.catch(() => {
+      // Ignore autoplay/user-gesture rejections for SFX.
+    });
+  }
+}
+
+function playFrostAuraSfx() {
+  const sfx = frostAuraSfx.cloneNode();
+  sfx.volume = frostAuraSfx.volume;
+  const attempt = sfx.play();
+  if (attempt && typeof attempt.catch === "function") {
+    attempt.catch(() => {
+      // Ignore autoplay/user-gesture rejections for SFX.
+    });
+  }
+}
 
 let selectedMap;
 let pathGrid;
@@ -209,74 +270,6 @@ function applyMapLayout(mapName) {
   spawnMarkers = computeSpawnMarkers(mapPathOptions);
 }
 
-function pathSerpentFull() {
-  const tiles = [];
-  for (let y = 0; y < 9; y += 1) {
-    if (y % 2 === 0) {
-      for (let x = 0; x <= COLS - 1; x += 1) {
-        tiles.push([x, y]);
-      }
-    } else {
-      for (let x = COLS - 1; x >= 0; x -= 1) {
-        tiles.push([x, y]);
-      }
-    }
-  }
-  tiles.push([COLS - 1, ROWS - 1]);
-  return tiles;
-}
-
-function dedupeConsecutiveTiles(tiles) {
-  if (!tiles.length) {
-    return tiles;
-  }
-  const out = [tiles[0]];
-  for (let i = 1; i < tiles.length; i += 1) {
-    const prev = out[out.length - 1];
-    const cur = tiles[i];
-    if (prev[0] !== cur[0] || prev[1] !== cur[1]) {
-      out.push(cur);
-    }
-  }
-  return out;
-}
-
-function pathSpiralPerimeter() {
-  const tiles = [];
-  let x0 = 0;
-  let y0 = 0;
-  let x1 = COLS - 1;
-  let y1 = ROWS - 1;
-  while (x0 <= x1 && y0 <= y1) {
-    for (let x = x0; x <= x1; x += 1) {
-      tiles.push([x, y0]);
-    }
-    y0 += 1;
-    if (y0 > y1) {
-      break;
-    }
-    for (let y = y0; y <= y1; y += 1) {
-      tiles.push([x1, y]);
-    }
-    x1 -= 1;
-    if (x0 > x1) {
-      break;
-    }
-    for (let x = x1; x >= x0; x -= 1) {
-      tiles.push([x, y1]);
-    }
-    y1 -= 1;
-    if (y0 > y1) {
-      break;
-    }
-    for (let y = y1; y >= y0; y -= 1) {
-      tiles.push([x0, y]);
-    }
-    x0 += 1;
-  }
-  return dedupeConsecutiveTiles(tiles);
-}
-
 function pathForkMergePaths() {
   const top = [];
   for (let x = 0; x <= 8; x += 1) {
@@ -304,61 +297,79 @@ function pathForkMergePaths() {
   };
 }
 
-function pathSwitchback() {
-  const tiles = [];
-  for (let x = 0; x <= COLS - 1; x += 1) {
-    tiles.push([x, 4]);
+function pathTridentPaths() {
+  const cx = 8;
+  const yMerge = 4;
+  const leftSp = 2;
+  const rightSp = 14;
+  const tail = [];
+  for (let y = yMerge + 1; y <= ROWS - 1; y += 1) {
+    tail.push([cx, y]);
   }
-  for (let x = COLS - 1; x >= 0; x -= 1) {
-    tiles.push([x, 5]);
+  const left = [];
+  for (let y = 0; y <= yMerge; y += 1) {
+    left.push([leftSp, y]);
   }
-  for (let x = 0; x <= COLS - 1; x += 1) {
-    tiles.push([x, 6]);
+  for (let x = leftSp + 1; x <= cx; x += 1) {
+    left.push([x, yMerge]);
   }
-  for (let x = COLS - 1; x >= 0; x -= 1) {
-    tiles.push([x, 7]);
+  const center = [];
+  for (let y = 0; y <= yMerge; y += 1) {
+    center.push([cx, y]);
   }
-  for (let x = 0; x <= COLS - 1; x += 1) {
-    tiles.push([x, 8]);
+  const right = [];
+  for (let y = 0; y <= yMerge; y += 1) {
+    right.push([rightSp, y]);
   }
-  for (let x = COLS - 1; x >= 0; x -= 1) {
-    tiles.push([x, 9]);
+  for (let x = rightSp - 1; x >= cx; x -= 1) {
+    right.push([x, yMerge]);
   }
-  return tiles;
+  return {
+    paths: [left.concat(tail), center.concat(tail), right.concat(tail)]
+  };
 }
 
-function pathCanyonL() {
+function dedupeConsecutiveTiles(tiles) {
+  if (!tiles.length) {
+    return tiles;
+  }
+  const out = [tiles[0]];
+  for (let i = 1; i < tiles.length; i += 1) {
+    const prev = out[out.length - 1];
+    const cur = tiles[i];
+    if (prev[0] !== cur[0] || prev[1] !== cur[1]) {
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+function pathSnakeS() {
   const tiles = [];
-  for (let y = 0; y <= ROWS - 1; y += 1) {
-    tiles.push([0, y]);
+  for (let y = 0; y < ROWS; y += 1) {
+    if (y % 2 === 0) {
+      for (let x = 0; x <= COLS - 1; x += 1) {
+        tiles.push([x, y]);
+      }
+    } else {
+      for (let x = COLS - 1; x >= 0; x -= 1) {
+        tiles.push([x, y]);
+      }
+    }
   }
-  for (let x = 1; x <= COLS - 1; x += 1) {
-    tiles.push([x, ROWS - 1]);
-  }
-  return tiles;
+  return dedupeConsecutiveTiles(tiles);
 }
 
 function buildMapLayout(mapName) {
-  const maps = {
-    serpent: {
-      paths: [pathSerpentFull()]
-    },
-    fork: (() => {
-      const fm = pathForkMergePaths();
-      return { paths: [fm.pathA, fm.pathB] };
-    })(),
-    spiral: {
-      paths: [pathSpiralPerimeter()]
-    },
-    switchback: {
-      paths: [pathSwitchback()]
-    },
-    canyon: {
-      paths: [pathCanyonL()]
-    }
-  };
-
-  const mapDef = maps[mapName] || maps.serpent;
+  let mapDef;
+  if (mapName === "trident") {
+    mapDef = pathTridentPaths();
+  } else if (mapName === "snake") {
+    mapDef = { paths: [pathSnakeS()] };
+  } else {
+    const fm = pathForkMergePaths();
+    mapDef = { paths: [fm.pathA, fm.pathB] };
+  }
   const allTiles = mapDef.paths.flat();
   const uniqueTiles = [];
   const seenTiles = new Set();
@@ -372,7 +383,7 @@ function buildMapLayout(mapName) {
 
   const longestPath = mapDef.paths.reduce((best, path) => (path.length > best.length ? path : best), mapDef.paths[0]);
   return {
-    mapName,
+    mapName: ["fork", "trident", "snake"].includes(mapName) ? mapName : "fork",
     paths: mapDef.paths,
     pathTiles: uniqueTiles,
     startTile: longestPath[0],
@@ -391,17 +402,17 @@ function createPathGrid(pathTiles) {
 }
 
 const LANE_PALETTES = [
-  { base: "#e8b86a", deep: "#b8732d", edge: "rgba(120, 55, 20, 0.55)", highlight: "rgba(255, 250, 235, 0.14)" },
-  { base: "#6eb0d8", deep: "#2d6a8a", edge: "rgba(15, 60, 90, 0.55)", highlight: "rgba(230, 248, 255, 0.16)" },
+  { base: "#e8c896", deep: "#b8863d", edge: "rgba(100, 55, 18, 0.58)", highlight: "rgba(255, 248, 220, 0.22)" },
+  { base: "#d4a574", deep: "#8b5a2a", edge: "rgba(85, 45, 12, 0.58)", highlight: "rgba(255, 235, 200, 0.18)" },
   { base: "#c9a0dc", deep: "#6b4589", edge: "rgba(45, 25, 70, 0.5)", highlight: "rgba(250, 240, 255, 0.14)" }
 ];
 
 const PATH_MERGE = {
-  base: "#9a8b78",
-  deep: "#5c5248",
-  edge: "rgba(40, 32, 28, 0.65)",
-  stripeA: "rgba(255, 255, 255, 0.12)",
-  stripeB: "rgba(0, 0, 0, 0.08)"
+  base: "#c4a060",
+  deep: "#7a5230",
+  edge: "rgba(70, 40, 15, 0.68)",
+  stripeA: "rgba(255, 255, 255, 0.14)",
+  stripeB: "rgba(40, 25, 10, 0.12)"
 };
 
 function createPathLaneGrid(pathsAsTiles) {
@@ -511,7 +522,7 @@ function drawPathGrassDividers(px, py, x, y) {
     }
     drawLine();
   };
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.42)";
+  ctx.strokeStyle = "rgba(55, 35, 10, 0.48)";
   ctx.lineWidth = w;
   edge(x, y - 1, () => {
     ctx.beginPath();
@@ -570,6 +581,7 @@ class Enemy {
     this.baseColor = config.color || "#8b0000";
     this.slowMultiplier = 1;
     this.slowTimer = 0;
+    this.iceSlowTimer = 0;
     this.hitFlashTimer = 0;
     this.reachedBase = false;
   }
@@ -590,6 +602,12 @@ class Enemy {
       if (this.slowTimer <= 0) {
         this.slowTimer = 0;
         this.slowMultiplier = 1;
+      }
+    }
+    if (this.iceSlowTimer > 0) {
+      this.iceSlowTimer -= dt;
+      if (this.iceSlowTimer <= 0) {
+        this.iceSlowTimer = 0;
       }
     }
     if (this.hitFlashTimer > 0) {
@@ -620,31 +638,38 @@ class Enemy {
   draw() {
     const hpRatio = Math.max(0, this.hp / this.maxHp);
     const bodyColor = this.hitFlashTimer > 0 ? darkenHexColor(this.baseColor, 0.35) : this.baseColor;
+    const t = performance.now() * 0.007;
+    const bob = Math.sin(t + this.x * 0.04 + this.y * 0.03) * 1.4;
+    const wobble = Math.sin(t * 1.2 + this.pathIndex * 0.35 + this.x * 0.02) * 0.05;
+    ctx.save();
+    ctx.translate(this.x, this.y + bob);
+    ctx.rotate(wobble);
     ctx.fillStyle = bodyColor;
     if (this.shape === "triangle") {
       ctx.beginPath();
-      ctx.moveTo(this.x, this.y - this.radius);
-      ctx.lineTo(this.x + this.radius * 0.9, this.y + this.radius * 0.8);
-      ctx.lineTo(this.x - this.radius * 0.9, this.y + this.radius * 0.8);
+      ctx.moveTo(0, -this.radius);
+      ctx.lineTo(this.radius * 0.9, this.radius * 0.8);
+      ctx.lineTo(-this.radius * 0.9, this.radius * 0.8);
       ctx.closePath();
       ctx.fill();
     } else if (this.shape === "square") {
       const side = this.radius * 1.75;
-      ctx.fillRect(this.x - side / 2, this.y - side / 2, side, side);
+      ctx.fillRect(-side / 2, -side / 2, side, side);
     } else {
       ctx.beginPath();
-      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
       ctx.fill();
     }
 
     if (this.isBoss) {
-      drawBossFace(this.x, this.y, this.radius);
+      drawBossFace(0, 0, this.radius);
     }
 
     ctx.fillStyle = "#1f2937";
-    ctx.fillRect(this.x - 16, this.y - 20, 32, 5);
+    ctx.fillRect(-16, -20, 32, 5);
     ctx.fillStyle = "#22c55e";
-    ctx.fillRect(this.x - 16, this.y - 20, 32 * hpRatio, 5);
+    ctx.fillRect(-16, -20, 32 * hpRatio, 5);
+    ctx.restore();
   }
 }
 
@@ -672,17 +697,50 @@ class Tower {
     this.barrelColor = type.barrelColor;
     this.railSpeed = type.railSpeed ?? 0;
     this.cooldown = 0;
+    this.aimAngle = -Math.PI / 2;
+    this.auraSoundTimer = 0;
+  }
+
+  updateAuraAim() {
+    let nearest = null;
+    let bestD = Infinity;
+    for (const enemy of state.enemies) {
+      if (enemy.hp <= 0) {
+        continue;
+      }
+      const d = Math.hypot(enemy.x - this.x, enemy.y - this.y);
+      if (d <= this.range && d < bestD) {
+        bestD = d;
+        nearest = enemy;
+      }
+    }
+    if (nearest) {
+      this.aimAngle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
+    }
   }
 
   update(dt) {
     if (this.aura) {
+      this.updateAuraAim();
+      let enemyInAura = false;
       for (const enemy of state.enemies) {
         const dist = Math.hypot(enemy.x - this.x, enemy.y - this.y);
         if (dist <= this.range) {
+          enemyInAura = true;
           enemy.applySlow(this.slowAmount, this.slowDuration);
         }
       }
+      this.auraSoundTimer = Math.max(0, this.auraSoundTimer - dt);
+      if (enemyInAura && this.auraSoundTimer <= 0) {
+        playFrostAuraSfx();
+        this.auraSoundTimer = 1;
+      }
       return;
+    }
+
+    const aimTarget = this.findTarget();
+    if (aimTarget) {
+      this.aimAngle = Math.atan2(aimTarget.y - this.y, aimTarget.x - this.x);
     }
 
     this.cooldown -= dt;
@@ -708,8 +766,16 @@ class Tower {
       const dirY = dy / len;
       const startX = this.x + dirX * 22;
       const startY = this.y + dirY * 22;
-      state.projectiles.push(new RailProjectile(startX, startY, dirX, dirY, this.railSpeed || 780, this.damage));
+      state.projectiles.push(new RailProjectile(startX, startY, dirX, dirY, this.railSpeed || 1000, this.damage));
+      playRailShotSfx();
       return;
+    }
+    if (this.typeId === "basic") {
+      playBasicTurretShotSfx();
+    } else if (this.typeId === "ice") {
+      playIceTurretShotSfx();
+    } else if (this.typeId === "rocket") {
+      playRocketTurretShotSfx();
     }
 
     state.projectiles.push(new Projectile(this.x, this.y, target, {
@@ -720,7 +786,8 @@ class Tower {
       slowDuration: this.slowDuration,
       splash: this.splash,
       splashHalfSize: this.splashHalfSize,
-      style: this.projectileStyle
+      style: this.projectileStyle,
+      sourceTowerTypeId: this.typeId
     }));
   }
 
@@ -736,7 +803,7 @@ class Tower {
       if (dist > this.range) {
         continue;
       }
-      if (this.typeId === "ice" && enemy.slowTimer > 0) {
+      if (this.typeId === "ice" && enemy.iceSlowTimer > 0) {
         continue;
       }
       const metric = this.targetMode === "highestHp" ? enemy.hp : enemy.pathIndex;
@@ -786,25 +853,32 @@ class Tower {
 
   draw() {
     if (this.aura) {
-      ctx.strokeStyle = "rgba(103, 232, 249, 0.28)";
-      ctx.lineWidth = 2;
+      const strong = this.typeId === "frost";
+      ctx.strokeStyle = strong ? "rgba(103, 232, 249, 0.55)" : "rgba(103, 232, 249, 0.28)";
+      ctx.lineWidth = strong ? 2.5 : 2;
+      ctx.setLineDash(strong ? [6, 4] : []);
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.fillStyle = "rgba(103, 232, 249, 0.07)";
+      ctx.setLineDash([]);
+      ctx.fillStyle = strong ? "rgba(103, 232, 249, 0.1)" : "rgba(103, 232, 249, 0.07)";
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.fillStyle = this.color;
     ctx.fillRect(this.x - 14, this.y - 14, 28, 28);
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.aimAngle + Math.PI / 2);
     ctx.fillStyle = this.barrelColor;
     if (this.typeId === "rail") {
-      ctx.fillRect(this.x - 16, this.y - 20, 32, 5);
-      ctx.fillRect(this.x - 3, this.y - 24, 6, 10);
+      ctx.fillRect(-16, -20, 32, 5);
+      ctx.fillRect(-3, -24, 6, 10);
     } else {
-      ctx.fillRect(this.x - 4, this.y - 20, 8, 10);
+      ctx.fillRect(-4, -20, 8, 10);
     }
+    ctx.restore();
   }
 }
 
@@ -823,6 +897,7 @@ class Projectile {
     this.style = config.style || "orb";
     this.angle = 0;
     this.done = false;
+    this.sourceTowerTypeId = config.sourceTowerTypeId || null;
   }
 
   update(dt) {
@@ -849,7 +924,18 @@ class Projectile {
 
   applyHit() {
     if (!this.splash) {
-      damageEnemy(this.target, this.damage, this.slowAmount, this.slowDuration);
+      let slowAmt = this.slowAmount;
+      if (
+        this.sourceTowerTypeId === "ice" &&
+        this.style === "snowflake" &&
+        isEnemyInAnyFrostAura(this.target)
+      ) {
+        slowAmt = 0.35;
+      }
+      damageEnemy(this.target, this.damage, slowAmt, this.slowDuration);
+      if (this.sourceTowerTypeId === "ice") {
+        this.target.iceSlowTimer = Math.max(this.target.iceSlowTimer, this.slowDuration);
+      }
       return;
     }
 
@@ -951,8 +1037,15 @@ class RailProjectile {
         continue;
       }
       if (segmentHitsCircle(this.prevX, this.prevY, this.x, this.y, enemy.x, enemy.y, enemy.radius + 3)) {
-        const dmg = enemy.isBoss ? this.damage * 1.5 : this.damage;
-        damageEnemy(enemy, dmg, 0, 0);
+        let dmg = this.damage;
+        let mult = 1;
+        if (enemy.isBoss) {
+          mult *= 1.5;
+        }
+        if (enemy.shape === "square") {
+          mult *= 1.5;
+        }
+        damageEnemy(enemy, dmg * mult, 0, 0);
         this.hitEnemies.add(enemy);
       }
     }
@@ -1043,7 +1136,8 @@ function spawnEnemy() {
     speed: state.waveConfig.speed * typeConfig.speedMultiplier,
     radius: typeConfig.radius ?? state.waveConfig.radius,
     color: typeConfig.color,
-    shape: typeConfig.shape
+    shape: typeConfig.shape,
+    isBoss: Boolean(state.waveConfig.isBoss)
   };
   state.enemies.push(new Enemy(enemyConfig, randomPath));
   state.enemiesSpawnedThisWave += 1;
@@ -1131,6 +1225,19 @@ function getWaveConfig(wave) {
     isBoss: false,
     color: "#8b0000"
   };
+}
+
+function isEnemyInAnyFrostAura(enemy) {
+  for (const tower of state.towers) {
+    if (tower.typeId !== "frost" || !tower.aura) {
+      continue;
+    }
+    const dist = Math.hypot(enemy.x - tower.x, enemy.y - tower.y);
+    if (dist <= tower.range) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function damageEnemy(enemy, damage, slowAmount, slowDuration) {
@@ -1355,11 +1462,28 @@ function grassShade(x, y) {
   return GRASS_BASE;
 }
 
+function drawBuildableGrassTile(px, py, x, y) {
+  ctx.fillStyle = grassShade(x, y);
+  ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.045)";
+  if ((x + y) % 2 === 0) {
+    ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+  }
+  ctx.fillStyle = BUILD_TILE_PATTERN;
+  ctx.fillRect(px + (x % 3) * 3, py + (y % 3) * 3, 2, 2);
+  const inset = 6;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.11)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 4]);
+  ctx.strokeRect(px + inset, py + inset, TILE_SIZE - inset * 2, TILE_SIZE - inset * 2);
+  ctx.setLineDash([]);
+}
+
 function drawGrid() {
   const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  grad.addColorStop(0, "#0f3026");
-  grad.addColorStop(0.5, "#0c281f");
-  grad.addColorStop(1, "#081c16");
+  grad.addColorStop(0, "#5f9448");
+  grad.addColorStop(0.45, "#528a3e");
+  grad.addColorStop(1, "#447030");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1371,17 +1495,11 @@ function drawGrid() {
         drawPathTile(px, py, x, y);
         drawPathGrassDividers(px, py, x, y);
       } else {
-        ctx.fillStyle = grassShade(x, y);
-        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        ctx.fillStyle = "rgba(0, 0, 0, 0.07)";
-        if ((x + y) % 2 === 0) {
-          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        }
-        ctx.fillStyle = "rgba(255, 255, 255, 0.025)";
-        ctx.fillRect(px + (x % 3) * 3, py + (y % 3) * 3, 2, 2);
+        drawBuildableGrassTile(px, py, x, y);
       }
 
-      ctx.strokeStyle = pathGrid[y][x] === 1 ? "rgba(0, 0, 0, 0.18)" : "rgba(0, 0, 0, 0.2)";
+      ctx.strokeStyle =
+        pathGrid[y][x] === 1 ? "rgba(70, 42, 14, 0.4)" : BUILD_TILE_STROKE;
       ctx.lineWidth = 1;
       ctx.strokeRect(px + 0.5, py + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     }
@@ -1481,14 +1599,14 @@ function drawSpawnIndicators() {
   const pulse = 0.75 + 0.25 * Math.sin(t * 2.8);
   for (const marker of spawnMarkers) {
     const { x, y, angle } = marker;
-    ctx.strokeStyle = `rgba(34, 197, 94, ${0.55 + 0.25 * pulse})`;
+    ctx.strokeStyle = `rgba(245, 158, 11, ${0.65 + 0.2 * pulse})`;
     ctx.lineWidth = 3;
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
     ctx.arc(x, y, 20, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = `rgba(34, 197, 94, ${0.12 * pulse})`;
+    ctx.fillStyle = `rgba(245, 158, 11, ${0.14 * pulse})`;
     ctx.beginPath();
     ctx.arc(x, y, 18, 0, Math.PI * 2);
     ctx.fill();
@@ -1498,12 +1616,12 @@ function drawSpawnIndicators() {
     ctx.textBaseline = y < 28 ? "top" : "bottom";
     ctx.fillStyle = "rgba(15, 23, 42, 0.6)";
     ctx.fillText("SPAWN", x + 0.5, labelY + (y < 28 ? 0.5 : -0.5));
-    ctx.fillStyle = "rgba(187, 247, 208, 0.98)";
+    ctx.fillStyle = "rgba(254, 243, 199, 0.98)";
     ctx.fillText("SPAWN", x, labelY);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
-    ctx.fillStyle = "#bbf7d0";
+    ctx.fillStyle = "#fde68a";
     ctx.beginPath();
     ctx.moveTo(14, 0);
     ctx.lineTo(4, -5);
@@ -1577,6 +1695,23 @@ function drawSellCursorIndicator() {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("$", x + 12, y - 12);
+  if (state.hoveredTile) {
+    const hoveredTower = state.towers.find(
+      (tower) => tower.tileX === state.hoveredTile.x && tower.tileY === state.hoveredTile.y
+    );
+    if (hoveredTower) {
+      const towerType = TOWER_TYPES[hoveredTower.typeId];
+      const refund = towerType ? towerType.cost : 0;
+      ctx.font = "bold 14px Arial";
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(250, 204, 21, 0.98)";
+      ctx.strokeStyle = "rgba(15, 23, 42, 0.75)";
+      ctx.lineWidth = 3;
+      const label = `+${refund}g sell`;
+      ctx.strokeText(label, x + 18, y - 32);
+      ctx.fillText(label, x + 18, y - 32);
+    }
+  }
 }
 
 function drawGameOver() {
@@ -1663,7 +1798,7 @@ function updateHud() {
   const iceCount = countTowersByType("ice");
   const rocketCount = countTowersByType("rocket");
   const railCount = countTowersByType("rail");
-  turretCountsEl.textContent = `Basic ${basicCount}/6, Frost ${frostCount}/3, Ice ${iceCount}/4, Rocket ${rocketCount}/2, Rail ${railCount}/2`;
+  turretCountsEl.textContent = `Basic ${basicCount}/6, Ice ${iceCount}/4, Frost ${frostCount}/3, Rocket ${rocketCount}/2, Rail ${railCount}/2`;
 
   startWaveBtn.disabled =
     !state.gameStarted || state.baseHp <= 0 || state.waveInProgress || state.gameWon || state.wave > FINAL_WAVE;
@@ -1678,8 +1813,11 @@ function updateHud() {
     state.wave > FINAL_WAVE;
   restartBtn.classList.toggle("hidden", !(state.baseHp <= 0 || state.gameWon));
   fastForwardBtn.disabled = !state.gameStarted || state.baseHp <= 0 || state.gameWon;
-  fastForwardBtn.classList.toggle("speed-btn-active", state.fastForward);
-  fastForwardBtn.textContent = state.fastForward ? "Fast Forward x2 (On)" : "Fast Forward x2";
+  fastForwardBtn.classList.toggle("speed-btn-active", state.speedMultiplier > 1);
+  fastForwardBtn.textContent = `Game speed: ×${state.speedMultiplier}`;
+  if (returnToMenuBtn) {
+    returnToMenuBtn.disabled = !state.gameStarted;
+  }
   sellModeBtn.disabled = !state.gameStarted || state.baseHp <= 0 || state.gameWon;
   sellModeBtn.classList.toggle("sell-mode-active", state.sellMode);
   sellModeBtn.textContent = state.sellMode ? "Sell Turret (On)" : "Sell Turret";
@@ -1710,8 +1848,7 @@ function gameLoop(now) {
   }
   const dt = Math.min(0.033, (now - previous) / 1000);
   previous = now;
-  const speedMultiplier = state.fastForward ? 2 : 1;
-  const scaledDt = dt * speedMultiplier;
+  const scaledDt = dt * state.speedMultiplier;
 
   update(scaledDt);
   draw();
@@ -1785,8 +1922,16 @@ fastForwardBtn.addEventListener("click", () => {
   if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
     return;
   }
-  state.fastForward = !state.fastForward;
+  state.speedMultiplier = state.speedMultiplier === 1 ? 2 : state.speedMultiplier === 2 ? 4 : 1;
 });
+if (returnToMenuBtn) {
+  returnToMenuBtn.addEventListener("click", () => {
+    if (!state.gameStarted) {
+      return;
+    }
+    openStartScreen();
+  });
+}
 sellModeBtn.addEventListener("click", () => {
   toggleSellMode();
 });
@@ -1832,6 +1977,11 @@ window.addEventListener("keydown", (event) => {
     toggleSellMode();
     return;
   }
+  if (event.code === "Space") {
+    event.preventDefault();
+    startWave();
+    return;
+  }
   const key = event.key;
   if (key >= "1" && key <= "5") {
     event.preventDefault();
@@ -1840,6 +1990,44 @@ window.addEventListener("keydown", (event) => {
 });
 
 let selectedMapIdForStart = null;
+let menuMusicUnlockBound = false;
+
+function playMenuMusic() {
+  if (!menuMusicEl) {
+    return;
+  }
+  menuMusicEl.volume = 0.5;
+  const playAttempt = menuMusicEl.play();
+  if (playAttempt && typeof playAttempt.catch === "function") {
+    playAttempt.catch(() => {
+      // Autoplay can be blocked until user gesture; we retry after interaction.
+    });
+  }
+}
+
+function stopMenuMusic() {
+  if (!menuMusicEl) {
+    return;
+  }
+  menuMusicEl.pause();
+  menuMusicEl.currentTime = 0;
+}
+
+function bindMenuMusicUnlock() {
+  if (!menuMusicEl || menuMusicUnlockBound) {
+    return;
+  }
+  menuMusicUnlockBound = true;
+  const unlock = () => {
+    if (!state.gameStarted) {
+      playMenuMusic();
+    }
+    document.removeEventListener("pointerdown", unlock);
+    document.removeEventListener("keydown", unlock);
+  };
+  document.addEventListener("pointerdown", unlock);
+  document.addEventListener("keydown", unlock);
+}
 
 function resetGameState() {
   state.wave = 1;
@@ -1860,7 +2048,7 @@ function resetGameState() {
   state.spawnTimer = 0;
   state.waveConfig = null;
   state.gameWon = false;
-  state.fastForward = false;
+  state.speedMultiplier = 1;
   state.difficultyHpMultiplier = 1;
 }
 
@@ -1869,15 +2057,15 @@ function renderMapThumbnail(ctx2, mapName, w, h) {
   const pg = createPathGrid(layout.pathTiles);
   const cw = w / COLS;
   const ch = h / ROWS;
-  ctx2.fillStyle = "#081c16";
+  ctx2.fillStyle = "#4a7a3a";
   ctx2.fillRect(0, 0, w, h);
   for (let y = 0; y < ROWS; y += 1) {
     for (let x = 0; x < COLS; x += 1) {
-      ctx2.fillStyle = pg[y][x] ? "#e8b86a" : "#0f3026";
+      ctx2.fillStyle = pg[y][x] ? "#d4a574" : "#5a8f46";
       ctx2.fillRect(x * cw, y * ch, cw + 0.5, ch + 0.5);
     }
   }
-  ctx2.strokeStyle = "rgba(255, 255, 255, 0.2)";
+  ctx2.strokeStyle = "rgba(255, 255, 255, 0.22)";
   ctx2.strokeRect(0.5, 0.5, w - 1, h - 1);
 }
 
@@ -1885,6 +2073,18 @@ function refreshBeginButtonState() {
   if (beginGameBtn) {
     beginGameBtn.disabled = !selectedMapIdForStart;
   }
+}
+
+function ensureDefaultMapSelection() {
+  if (MAP_CATALOG.length !== 1 || !mapCardsEl) {
+    return;
+  }
+  selectedMapIdForStart = MAP_CATALOG[0].id;
+  const only = mapCardsEl.querySelector(".map-card");
+  if (only) {
+    only.classList.add("selected");
+  }
+  refreshBeginButtonState();
 }
 
 function buildMapCards() {
@@ -1918,6 +2118,7 @@ function buildMapCards() {
     });
     mapCardsEl.appendChild(card);
   }
+  ensureDefaultMapSelection();
 }
 
 function openStartScreen() {
@@ -1927,11 +2128,12 @@ function openStartScreen() {
     mapCardsEl.querySelectorAll(".map-card").forEach((c) => c.classList.remove("selected"));
   }
   resetGameState();
-  applyMapLayout("serpent");
-  refreshBeginButtonState();
+  applyMapLayout("fork");
+  ensureDefaultMapSelection();
   if (startOverlayEl) {
     startOverlayEl.classList.remove("hidden");
   }
+  playMenuMusic();
 }
 
 function setupTowerTooltips() {
@@ -1972,17 +2174,19 @@ if (beginGameBtn) {
     resetGameState();
     state.difficultyHpMultiplier = getSelectedDifficulty() === "easy" ? 0.75 : 1;
     state.gameStarted = true;
+    stopMenuMusic();
     if (startOverlayEl) {
       startOverlayEl.classList.add("hidden");
     }
   });
 }
 
-applyMapLayout("serpent");
+applyMapLayout("fork");
 resetGameState();
 state.gameStarted = false;
 buildMapCards();
-refreshBeginButtonState();
 setupTowerTooltips();
+bindMenuMusicUnlock();
+playMenuMusic();
 
 requestAnimationFrame(gameLoop);

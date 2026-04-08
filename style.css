@@ -75,6 +75,14 @@ button:disabled {
   background: #059669;
 }
 
+.return-menu-btn {
+  background: #64748b;
+}
+
+.return-menu-btn:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
 .hidden {
   display: none;
 }
@@ -232,10 +240,11 @@ button:disabled {
 .tower-tooltip {
   position: fixed;
   z-index: 2000;
-  max-width: 280px;
+  max-width: 320px;
   padding: 10px 12px;
   font-size: 0.82rem;
   line-height: 1.4;
+  white-space: pre-line;
   background: #0f172a;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 8px;
