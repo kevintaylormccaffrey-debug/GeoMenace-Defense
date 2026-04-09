@@ -4,11 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GeoMenace Defense</title>
-  <link rel="stylesheet" href="style.css?v=4">
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-C1N9ZTMCXP"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag("js", new Date());
+    gtag("config", "G-C1N9ZTMCXP");
+  </script>
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <audio id="menuMusic" src="assets/menu-theme.mp3" preload="auto" loop></audio>
-  <div id="startOverlay" class="start-overlay">
+  <div id="loreOverlay" class="lore-overlay" aria-live="polite">
+    <div id="loreTransmissionText" class="lore-transmission"></div>
+    <p class="lore-continue-hint">Press any button to continue.</p>
+  </div>
+  <div id="startOverlay" class="start-overlay hidden">
     <div class="start-card">
       <h1 class="start-title">GeoMenace Defense</h1>
       <p class="start-sub">Choose a map and difficulty, then begin.</p>
@@ -41,10 +52,9 @@
       <h1>GeoMenace Defense</h1>
       <div class="stats">
         <span>Wave: <strong id="wave">1</strong></span>
-        <span>Gold: <strong id="gold">250</strong></span>
         <span>Base HP: <strong id="baseHp">20</strong></span>
         <span>Enemies Left: <strong id="remaining">0</strong></span>
-        <span>Turrets: <strong id="turretCounts">Basic 0/6, Ice 0/4, Frost 0/3, Rocket 0/2, Rail 0/2</strong></span>
+        <span>Turrets: <strong id="turretCounts">Basic 0/6, Ice 0/4, Frost 0/2, Rocket 0/2, Rail 0/1</strong></span>
       </div>
       <div class="controls">
         <button id="startWaveBtn" type="button">Start Wave</button>
@@ -61,6 +71,7 @@
 
     <section class="game-layout">
       <aside class="tower-panel">
+        <div class="tower-gold-card">Gold: <strong id="gold">250</strong></div>
         <h2>Tower Menu</h2>
         <p class="tower-menu-hint"><span class="hint-bubble" aria-hidden="true">i</span> Hover a tower for full stats and behavior.</p>
         <div class="tower-menu" id="towerMenu">
@@ -84,15 +95,15 @@
     <div id="audioSettingsPanel" class="audio-settings-panel hidden">
       <label class="audio-slider-row" for="sfxVolumeSlider">
         <span id="sfxVolumeLabel">Game SFX: 5</span>
-        <input id="sfxVolumeSlider" type="range" min="1" max="10" value="5">
+        <input id="sfxVolumeSlider" type="range" min="0" max="10" value="5">
       </label>
       <label class="audio-slider-row" for="musicVolumeSlider">
         <span id="musicVolumeLabel">Music: 5</span>
-        <input id="musicVolumeSlider" type="range" min="1" max="10" value="5">
+        <input id="musicVolumeSlider" type="range" min="0" max="10" value="5">
       </label>
     </div>
   </div>
 
-  <script src="game.js?v=20"></script>
+  <script src="game.js?v=25"></script>
 </body>
 </html>

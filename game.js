@@ -11,6 +11,8 @@ const towerButtons = [...document.querySelectorAll(".tower-btn")];
 const startWaveBtn = document.getElementById("startWaveBtn");
 const rerollMapBtn = document.getElementById("rerollMapBtn");
 const startOverlayEl = document.getElementById("startOverlay");
+const loreOverlayEl = document.getElementById("loreOverlay");
+const loreTransmissionEl = document.getElementById("loreTransmissionText");
 const beginGameBtn = document.getElementById("beginGameBtn");
 const mapCardsEl = document.getElementById("mapCards");
 const towerTooltipEl = document.getElementById("towerTooltip");
@@ -43,6 +45,9 @@ const BUILD_TILE_STROKE = "rgba(25, 70, 25, 0.38)";
 const BUILD_TILE_PATTERN = "rgba(255, 255, 255, 0.06)";
 const FINAL_WAVE = 10;
 const KILL_GOLD = 10;
+const WAVE_BASE_BONUS_START = 20;
+const WAVE_BASE_BONUS_STEP = 10;
+const WAVE_FLAWLESS_BONUS = 10;
 const AUDIO_MAX_LEVEL = 10;
 const BASE_MUSIC_VOLUME = 0.5;
 const BASE_SFX_VOLUME = {
@@ -74,7 +79,7 @@ const TOWER_TYPES = {
     id: "frost",
     name: "Frost Aura Tower",
     description:
-      "Continuous aura: Enemies inside the ring are slowed by 25%. Ice Turret snowflakes that hit an enemy inside any Frost Aura apply 35% slow instead of 25%.\nStats:\nCost: 150g,\nRange: 145,\nAura slow: 25% (always on in range),\nSynergy: Ice hits in aura → 35% slow,\nNo shots — aura only.\nMax 3 towers.",
+      "Continuous aura: Enemies inside the ring are slowed by 25%. Ice Turret snowflakes that hit an enemy inside any Frost Aura apply 35% slow instead of 25%.\nStats:\nCost: 150g,\nRange: 145,\nAura slow: 25% (always on in range),\nSynergy: Ice hits in aura → 35% slow,\nNo shots — aura only.\nMax 2 towers.",
     cost: 150,
     range: 145,
     color: "#0891b2",
@@ -82,7 +87,7 @@ const TOWER_TYPES = {
     aura: true,
     slowAmount: 0.25,
     slowDuration: 0.22,
-    maxCount: 3
+    maxCount: 2
   },
   ice: {
     id: "ice",
@@ -126,7 +131,7 @@ const TOWER_TYPES = {
     id: "rail",
     name: "Rail Gun Turret",
     description:
-      "Piercing beam through every enemy along a line; aims for the direction that hits the most targets.\nStats:\nCost: 400g,\nRange: 350,\nDamage: 45 per hit,\nShot Interval: 4s,\nBeam speed: 1000,\nBonus vs boss: 1.5×,\nBonus vs square enemies: 1.5×,\nTarget Prio: Most enemies on line.\nMax 2 towers.",
+      "Piercing beam through every enemy along a line; aims for the direction that hits the most targets.\nStats:\nCost: 400g,\nRange: 350,\nDamage: 45 per hit,\nShot Interval: 4s,\nBeam speed: 1000,\nBonus vs boss: 1.5×,\nBonus vs square enemies: 1.5×,\nTarget Prio: Most enemies on line.\nMax 1 tower.",
     cost: 400,
     range: 350,
     damage: 45,
@@ -135,25 +140,25 @@ const TOWER_TYPES = {
     barrelColor: "#fbbf24",
     targetMode: "progress",
     railSpeed: 1000,
-    maxCount: 2
+    maxCount: 1
   }
 };
 
 const MAP_CATALOG = [
   {
+    id: "snake",
+    name: "Snake (Easy)",
+    blurb: "S-shaped path from top to bottom."
+  },
+  {
     id: "fork",
-    name: "Fork Map",
+    name: "Fork (Medium)",
     blurb: "Two lanes merge before the base."
   },
   {
     id: "trident",
-    name: "Trident",
+    name: "Trident (Hard)",
     blurb: "Three top spawns funnel into one lane to the base."
-  },
-  {
-    id: "snake",
-    name: "Snake",
-    blurb: "S-shaped path from top to bottom."
   }
 ];
 
@@ -173,13 +178,22 @@ const state = {
   mouseCanvasPos: null,
   enemiesSpawnedThisWave: 0,
   enemiesToSpawnThisWave: 0,
+  enemiesReachedBaseThisWave: 0,
   spawnTimer: 0,
   waveConfig: null,
   gameWon: false,
+  gameOverTracked: false,
   speedMultiplier: 1,
   difficultyHpMultiplier: 1,
   gameStarted: false
 };
+
+function trackEvent(name, params = {}) {
+  if (typeof window.gtag !== "function") {
+    return;
+  }
+  window.gtag("event", name, params);
+}
 
 railShotSfx.preload = "auto";
 basicTurretShotSfx.preload = "auto";
@@ -193,7 +207,7 @@ const audioSettings = {
 };
 
 function clampAudioLevel(value) {
-  return Math.max(1, Math.min(AUDIO_MAX_LEVEL, value));
+  return Math.max(0, Math.min(AUDIO_MAX_LEVEL, value));
 }
 
 function getSfxMasterVolume() {
@@ -432,7 +446,7 @@ function pathSnakeS() {
       add(x, y);
     }
   };
-  h(0, 2, 14);
+  h(0, 0, 14);
   v(14, 1, 2);
   h(2, 14, 4);
   v(4, 3, 5);
@@ -894,32 +908,13 @@ class Tower {
     this.color = type.color;
     this.barrelColor = type.barrelColor;
     this.railSpeed = type.railSpeed ?? 0;
-    this.cooldown = 0;
+    this.cooldown = this.typeId === "rail" ? 0.5 : 0;
     this.aimAngle = -Math.PI / 2;
     this.auraSoundTimer = 0;
   }
 
-  updateAuraAim() {
-    let nearest = null;
-    let bestD = Infinity;
-    for (const enemy of state.enemies) {
-      if (enemy.hp <= 0) {
-        continue;
-      }
-      const d = Math.hypot(enemy.x - this.x, enemy.y - this.y);
-      if (d <= this.range && d < bestD) {
-        bestD = d;
-        nearest = enemy;
-      }
-    }
-    if (nearest) {
-      this.aimAngle = Math.atan2(nearest.y - this.y, nearest.x - this.x);
-    }
-  }
-
   update(dt) {
     if (this.aura) {
-      this.updateAuraAim();
       let enemyInAura = false;
       for (const enemy of state.enemies) {
         const dist = Math.hypot(enemy.x - this.x, enemy.y - this.y);
@@ -1049,20 +1044,100 @@ class Tower {
     return best;
   }
 
+  drawFrostAuraTower() {
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 3.2);
+    const breathe = 0.92 + 0.08 * Math.sin(t * 2.1);
+
+    ctx.strokeStyle = "rgba(103, 232, 249, 0.55)";
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(103, 232, 249, 0.1)";
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(34, 211, 238, ${0.2 + 0.18 * pulse})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.range * 0.45 * breathe, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "#0c2f38";
+    ctx.beginPath();
+    ctx.moveTo(this.x - 22, this.y + 16);
+    ctx.lineTo(this.x + 22, this.y + 16);
+    ctx.lineTo(this.x + 17, this.y + 5);
+    ctx.lineTo(this.x - 17, this.y + 5);
+    ctx.closePath();
+    ctx.fill();
+
+    const bodyGrad = ctx.createLinearGradient(this.x, this.y - 20, this.x, this.y + 10);
+    bodyGrad.addColorStop(0, "#164e63");
+    bodyGrad.addColorStop(0.45, "#0e7490");
+    bodyGrad.addColorStop(1, "#0c4a5e");
+    ctx.fillStyle = bodyGrad;
+    ctx.fillRect(this.x - 12, this.y - 14, 24, 24);
+
+    ctx.fillStyle = "rgba(207, 250, 254, 0.35)";
+    ctx.fillRect(this.x - 10, this.y - 12, 4, 18);
+
+    ctx.strokeStyle = "rgba(125, 211, 252, 0.45)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(this.x - 12, this.y - 14, 24, 24);
+
+    ctx.fillStyle = "#155e75";
+    ctx.beginPath();
+    ctx.moveTo(this.x - 14, this.y - 14);
+    ctx.lineTo(this.x + 14, this.y - 14);
+    ctx.lineTo(this.x + 10, this.y - 22);
+    ctx.lineTo(this.x - 10, this.y - 22);
+    ctx.closePath();
+    ctx.fill();
+
+    const orbR = 6 + 1.2 * pulse;
+    ctx.shadowColor = "rgba(56, 189, 248, 0.9)";
+    ctx.shadowBlur = 12 + 14 * pulse;
+    ctx.fillStyle = "#67e8f9";
+    ctx.beginPath();
+    ctx.arc(this.x, this.y - 26, orbR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.beginPath();
+    ctx.arc(this.x - 2, this.y - 28, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(165, 243, 252, ${0.35 + 0.25 * pulse})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y - 26, orbR + 4 + 2 * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
   draw() {
     if (this.aura) {
-      const strong = this.typeId === "frost";
-      ctx.strokeStyle = strong ? "rgba(103, 232, 249, 0.55)" : "rgba(103, 232, 249, 0.28)";
-      ctx.lineWidth = strong ? 2.5 : 2;
-      ctx.setLineDash(strong ? [6, 4] : []);
+      if (this.typeId === "frost") {
+        this.drawFrostAuraTower();
+        return;
+      }
+      ctx.strokeStyle = "rgba(103, 232, 249, 0.28)";
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = strong ? "rgba(103, 232, 249, 0.1)" : "rgba(103, 232, 249, 0.07)";
+      ctx.fillStyle = "rgba(103, 232, 249, 0.07)";
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = this.color;
+      ctx.fillRect(this.x - 14, this.y - 14, 28, 28);
+      return;
     }
     ctx.fillStyle = this.color;
     ctx.fillRect(this.x - 14, this.y - 14, 28, 28);
@@ -1317,9 +1392,15 @@ function startWave() {
   state.spawning = true;
   state.enemiesSpawnedThisWave = 0;
   state.enemiesToSpawnThisWave = config.enemyCount;
+  state.enemiesReachedBaseThisWave = 0;
   state.spawnTimer = 0;
   state.waveConfig = config;
   startWaveBtn.disabled = true;
+  trackEvent("wave_start", {
+    wave: state.wave,
+    map: selectedMap ? selectedMap.mapName : "unknown",
+    difficulty: state.difficultyHpMultiplier < 1 ? "easy" : "normal"
+  });
 }
 
 function spawnEnemy() {
@@ -1531,6 +1612,12 @@ function placeTower(tileX, tileY) {
 
   state.gold -= towerType.cost;
   state.towers.push(new Tower(tileX, tileY, towerType.id));
+  trackEvent("tower_placed", {
+    tower_type: towerType.id,
+    wave: state.wave,
+    gold_remaining: state.gold,
+    map: selectedMap ? selectedMap.mapName : "unknown"
+  });
 }
 
 function sellTower(tileX, tileY) {
@@ -1543,6 +1630,12 @@ function sellTower(tileX, tileY) {
   if (towerType) {
     state.gold += towerType.cost;
   }
+  trackEvent("tower_sold", {
+    tower_type: tower.typeId,
+    wave: state.wave,
+    gold_after_sell: state.gold,
+    map: selectedMap ? selectedMap.mapName : "unknown"
+  });
   state.towers.splice(towerIndex, 1);
 }
 
@@ -1613,8 +1706,17 @@ function update(dt) {
   for (const enemy of state.enemies) {
     if (enemy.reachedBase) {
       state.baseHp -= enemy.baseDamage;
+      state.enemiesReachedBaseThisWave += 1;
       if (state.baseHp <= 0) {
         state.gameWon = false;
+        if (!state.gameOverTracked) {
+          state.gameOverTracked = true;
+          trackEvent("game_over", {
+            wave_reached: state.wave,
+            map: selectedMap ? selectedMap.mapName : "unknown",
+            towers_placed: state.towers.length
+          });
+        }
       }
       continue;
     }
@@ -1632,19 +1734,31 @@ function update(dt) {
     const completedWave = state.wave;
     state.waveInProgress = false;
     state.waveConfig = null;
+    trackEvent("wave_complete", {
+      wave: completedWave,
+      map: selectedMap ? selectedMap.mapName : "unknown",
+      base_hp: state.baseHp
+    });
 
     if (completedWave >= FINAL_WAVE) {
       if (state.baseHp > 0) {
         state.gameWon = true;
         state.selectedTowerType = null;
         startWaveBtn.disabled = true;
+        trackEvent("victory", {
+          final_wave: completedWave,
+          map: selectedMap ? selectedMap.mapName : "unknown",
+          towers_placed: state.towers.length
+        });
       }
       return;
     }
 
     state.wave += 1;
     startWaveBtn.disabled = false;
-    const waveBonus = completedWave === 1 ? 40 : completedWave * 10;
+    const baseWaveBonus = WAVE_BASE_BONUS_START + (completedWave - 1) * WAVE_BASE_BONUS_STEP;
+    const flawlessBonus = state.enemiesReachedBaseThisWave === 0 ? WAVE_FLAWLESS_BONUS : 0;
+    const waveBonus = baseWaveBonus + flawlessBonus;
     state.gold += waveBonus;
   }
 }
@@ -1694,33 +1808,20 @@ function drawGrid() {
     for (let x = 0; x < COLS; x += 1) {
       const px = x * TILE_SIZE;
       const py = y * TILE_SIZE;
-      if (isSnake) {
-        if (pathGrid[y][x] === 1) {
-          drawSnakeStonePathTile(px, py, x, y);
-          drawSnakePathGrassDividers(px, py, x, y);
-        } else {
-          ctx.save();
-          if (snakeMapBgLoaded && snakeMapBg.complete) {
-            ctx.globalAlpha = 0.82;
-          }
-          drawSnakeGrassTile(px, py, x, y);
-          ctx.restore();
-        }
-        ctx.strokeStyle =
-          pathGrid[y][x] === 1 ? "rgba(55, 52, 46, 0.35)" : "rgba(18, 62, 18, 0.42)";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px + 0.5, py + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
-        continue;
-      }
       if (pathGrid[y][x] === 1) {
-        drawPathTile(px, py, x, y);
-        drawPathGrassDividers(px, py, x, y);
+        drawSnakeStonePathTile(px, py, x, y);
+        drawSnakePathGrassDividers(px, py, x, y);
       } else {
-        drawBuildableGrassTile(px, py, x, y);
+        ctx.save();
+        if (isSnake && snakeMapBgLoaded && snakeMapBg.complete) {
+          ctx.globalAlpha = 0.82;
+        }
+        drawSnakeGrassTile(px, py, x, y);
+        ctx.restore();
       }
 
       ctx.strokeStyle =
-        pathGrid[y][x] === 1 ? "rgba(70, 42, 14, 0.4)" : BUILD_TILE_STROKE;
+        pathGrid[y][x] === 1 ? "rgba(55, 52, 46, 0.35)" : "rgba(18, 62, 18, 0.42)";
       ctx.lineWidth = 1;
       ctx.strokeRect(px + 0.5, py + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     }
@@ -2020,7 +2121,7 @@ function updateHud() {
   const iceCount = countTowersByType("ice");
   const rocketCount = countTowersByType("rocket");
   const railCount = countTowersByType("rail");
-  turretCountsEl.textContent = `Basic ${basicCount}/6, Ice ${iceCount}/4, Frost ${frostCount}/3, Rocket ${rocketCount}/2, Rail ${railCount}/2`;
+  turretCountsEl.textContent = `Basic ${basicCount}/6, Ice ${iceCount}/4, Frost ${frostCount}/2, Rocket ${rocketCount}/2, Rail ${railCount}/1`;
 
   startWaveBtn.disabled =
     !state.gameStarted || state.baseHp <= 0 || state.waveInProgress || state.gameWon || state.wave > FINAL_WAVE;
@@ -2050,7 +2151,9 @@ function updateHud() {
     const isActive = state.selectedTowerType === typeId;
     button.classList.toggle("active", isActive);
     const atCap = type ? isTowerTypeAtCapacity(typeId) : false;
-    button.disabled = !state.gameStarted || state.baseHp <= 0 || state.gameWon || !type || atCap;
+    const unaffordable = Boolean(type) && state.gold < type.cost;
+    button.classList.toggle("unaffordable", state.gameStarted && unaffordable && !atCap);
+    button.disabled = !state.gameStarted || state.baseHp <= 0 || state.gameWon || !type || atCap || unaffordable;
     if (atCap && isActive) {
       state.selectedTowerType = null;
     }
@@ -2213,6 +2316,118 @@ window.addEventListener("keydown", (event) => {
 
 let selectedMapIdForStart = null;
 let menuMusicUnlockBound = false;
+let loreTypingTimer = null;
+
+const LORE_PARAGRAPHS = [
+  "Incoming Transmission...",
+  "Welcome Commander,",
+  "If you are reading this message it means you've passed the Geometric Defensive Tactics and Combat training course, or what you called Geometry 101.",
+  "That's right, that wasn't just any class it was a training…and you've been called up. We need all the tower commanders we can get our hands on to defend Earth against the GeoScourge.",
+  "We are not yet sure where they come from or what they want, but one thing we know is that they WILL be DESTROYED.",
+  "I have given you full command of our defensive towers and logistics, now defend what is OURS…"
+];
+
+function getLoreFullText() {
+  const n = LORE_PARAGRAPHS.length;
+  if (n === 0) {
+    return "";
+  }
+  let s = LORE_PARAGRAPHS[0];
+  for (let i = 1; i < n; i += 1) {
+    s += (i === 1 ? "\n" : "\n\n") + LORE_PARAGRAPHS[i];
+  }
+  return s;
+}
+
+function stopMenuMusic() {
+  if (!menuMusicEl) {
+    return;
+  }
+  menuMusicEl.pause();
+  menuMusicEl.currentTime = 0;
+}
+
+function clearLoreTyping() {
+  if (loreTypingTimer !== null) {
+    clearInterval(loreTypingTimer);
+    loreTypingTimer = null;
+  }
+}
+
+function startLoreTyping() {
+  clearLoreTyping();
+  if (!loreTransmissionEl) {
+    return;
+  }
+  const words = [];
+  LORE_PARAGRAPHS.forEach((p, i) => {
+    words.push(...p.split(/\s+/).filter(Boolean));
+    if (i < LORE_PARAGRAPHS.length - 1) {
+      words.push(i === 0 ? "\n" : "\n\n");
+    }
+  });
+  let i = 0;
+  let buffer = "";
+  loreTypingTimer = setInterval(() => {
+    if (i >= words.length) {
+      clearLoreTyping();
+      return;
+    }
+    const w = words[i];
+    i += 1;
+    if (w === "\n" || w === "\n\n") {
+      buffer += w;
+    } else {
+      const endsBreak = buffer.endsWith("\n") || buffer.endsWith("\n\n");
+      buffer += (buffer && !endsBreak ? " " : "") + w;
+    }
+    loreTransmissionEl.textContent = buffer;
+  }, 28);
+}
+
+function dismissLoreScreen() {
+  clearLoreTyping();
+  if (loreTransmissionEl) {
+    loreTransmissionEl.textContent = getLoreFullText();
+  }
+  if (loreOverlayEl) {
+    loreOverlayEl.classList.add("hidden");
+  }
+  if (startOverlayEl) {
+    startOverlayEl.classList.remove("hidden");
+  }
+  applyAudioVolumes();
+  playMenuMusic();
+  bindMenuMusicUnlock();
+}
+
+function onLoreContinue(event) {
+  if (!loreOverlayEl || loreOverlayEl.classList.contains("hidden")) {
+    return;
+  }
+  event.preventDefault();
+  document.removeEventListener("keydown", onLoreContinue);
+  document.removeEventListener("pointerdown", onLoreContinue);
+  dismissLoreScreen();
+}
+
+function startLoreScreen() {
+  stopMenuMusic();
+  if (!loreOverlayEl || !loreTransmissionEl) {
+    if (startOverlayEl) {
+      startOverlayEl.classList.remove("hidden");
+    }
+    applyAudioVolumes();
+    playMenuMusic();
+    bindMenuMusicUnlock();
+    return;
+  }
+  loreOverlayEl.classList.remove("hidden");
+  loreTransmissionEl.textContent = "";
+  startLoreTyping();
+  document.addEventListener("keydown", onLoreContinue);
+  document.addEventListener("pointerdown", onLoreContinue);
+}
 
 function playMenuMusic() {
   if (!menuMusicEl) {
@@ -2258,14 +2473,16 @@ function setupAudioControls() {
   }
   if (sfxVolumeSlider) {
     sfxVolumeSlider.addEventListener("input", () => {
-      audioSettings.sfxLevel = clampAudioLevel(Number.parseInt(sfxVolumeSlider.value, 10) || 5);
+      const next = Number.parseInt(sfxVolumeSlider.value, 10);
+      audioSettings.sfxLevel = clampAudioLevel(Number.isNaN(next) ? 5 : next);
       applyAudioVolumes();
       refreshAudioHudUi();
     });
   }
   if (musicVolumeSlider) {
     musicVolumeSlider.addEventListener("input", () => {
-      audioSettings.musicLevel = clampAudioLevel(Number.parseInt(musicVolumeSlider.value, 10) || 5);
+      const next = Number.parseInt(musicVolumeSlider.value, 10);
+      audioSettings.musicLevel = clampAudioLevel(Number.isNaN(next) ? 5 : next);
       applyAudioVolumes();
       refreshAudioHudUi();
     });
@@ -2288,9 +2505,11 @@ function resetGameState() {
   state.mouseCanvasPos = null;
   state.enemiesSpawnedThisWave = 0;
   state.enemiesToSpawnThisWave = 0;
+  state.enemiesReachedBaseThisWave = 0;
   state.spawnTimer = 0;
   state.waveConfig = null;
   state.gameWon = false;
+  state.gameOverTracked = false;
   state.speedMultiplier = 1;
   state.difficultyHpMultiplier = 1;
 }
@@ -2373,6 +2592,15 @@ function openStartScreen() {
   resetGameState();
   applyMapLayout("fork");
   ensureDefaultMapSelection();
+  if (loreOverlayEl) {
+    loreOverlayEl.classList.add("hidden");
+  }
+  clearLoreTyping();
+  if (loreTransmissionEl) {
+    loreTransmissionEl.textContent = "";
+  }
+  document.removeEventListener("keydown", onLoreContinue);
+  document.removeEventListener("pointerdown", onLoreContinue);
   if (startOverlayEl) {
     startOverlayEl.classList.remove("hidden");
   }
@@ -2415,8 +2643,13 @@ if (beginGameBtn) {
     }
     applyMapLayout(selectedMapIdForStart);
     resetGameState();
-    state.difficultyHpMultiplier = getSelectedDifficulty() === "easy" ? 0.75 : 1;
+    const difficulty = getSelectedDifficulty();
+    state.difficultyHpMultiplier = difficulty === "easy" ? 0.75 : 1;
     state.gameStarted = true;
+    trackEvent("game_start", {
+      map: selectedMap ? selectedMap.mapName : selectedMapIdForStart,
+      difficulty
+    });
     if (startOverlayEl) {
       startOverlayEl.classList.add("hidden");
     }
@@ -2430,7 +2663,6 @@ buildMapCards();
 setupTowerTooltips();
 setupAudioControls();
 applyAudioVolumes();
-bindMenuMusicUnlock();
-playMenuMusic();
+startLoreScreen();
 
 requestAnimationFrame(gameLoop);

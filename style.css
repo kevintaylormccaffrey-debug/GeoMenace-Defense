@@ -105,6 +105,43 @@ button:disabled {
   flex-direction: column;
 }
 
+.lore-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: #b8c5d0;
+  padding: clamp(24px, 5vw, 48px);
+  padding-bottom: 72px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.lore-overlay.hidden {
+  display: none;
+}
+
+.lore-transmission {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  line-height: 1.65;
+  font-size: clamp(0.9rem, 1.6vw, 1.05rem);
+  text-shadow: 0 0 12px rgba(100, 180, 255, 0.15);
+}
+
+.lore-continue-hint {
+  flex-shrink: 0;
+  margin: 0;
+  padding-top: 16px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: #7a8a96;
+  letter-spacing: 0.02em;
+}
+
 .start-overlay {
   position: fixed;
   inset: 0;
@@ -286,6 +323,21 @@ button:disabled {
   padding: 12px;
 }
 
+.tower-gold-card {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  background: linear-gradient(180deg, rgba(120, 53, 15, 0.35) 0%, rgba(51, 30, 10, 0.55) 100%);
+  color: #fde68a;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.tower-gold-card strong {
+  color: #facc15;
+}
+
 .tower-panel h2 {
   margin: 0 0 10px;
   font-size: 1rem;
@@ -294,6 +346,11 @@ button:disabled {
 .tower-panel .tower-btn {
   width: 100%;
   text-align: left;
+}
+
+.tower-panel .tower-btn.unaffordable {
+  background: #475569;
+  color: #cbd5e1;
 }
 
 .game-stage canvas#gameCanvas {
