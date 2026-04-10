@@ -1,6 +1,25 @@
+/**
+ * GeoMenace Defense — game logic (single file).
+ *
+ * How the pieces fit together:
+ * 1) Boot: applyMapLayout + resetGameState, show lore → start overlay → Begin starts the run.
+ * 2) State: the `state` object is the live game snapshot (entities, wave flags, gold, etc.).
+ * 3) Loop: requestAnimationFrame → gameLoop → update(dt) then draw() then updateHud().
+ *    `dt` is scaled by speedMultiplier for fast-forward.
+ * 4) Maps: tile paths are built in buildMapLayout*; pathGrid / pathLaneGrid / buildableGrid drive
+ *    collision, lane coloring, and where towers may be placed.
+ * 5) Entities: Enemy (moves along a pixel path), Tower (aims & fires or aura), Projectile /
+ *    RailProjectile (damage), ExplosionEffect (rocket splash visuals).
+ * 6) Waves: startWave sets waveConfig; update() spawns on a timer until count reached; when no
+ *    enemies remain, wave ends, gold bonus applies, wave number increments.
+ *
+ * Good edit targets for balance: constants below TILE_SIZE, TOWER_TYPES, getWaveConfig,
+ * KILL_GOLD / WAVE_*_BONUS, FINAL_WAVE, and Enemy/Tower behavior in their classes.
+ */
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
+// --- DOM & media handles (match ids/classes in index.html; rerollMapBtn may be absent) ---
 const waveEl = document.getElementById("wave");
 const goldEl = document.getElementById("gold");
 const baseHpEl = document.getElementById("baseHp");
@@ -29,12 +48,20 @@ const sfxVolumeSlider = document.getElementById("sfxVolumeSlider");
 const musicVolumeSlider = document.getElementById("musicVolumeSlider");
 const sfxVolumeLabel = document.getElementById("sfxVolumeLabel");
 const musicVolumeLabel = document.getElementById("musicVolumeLabel");
+const holdFSellCheckbox = document.getElementById("holdFSellCheckbox");
+const nextWavePanel = document.getElementById("nextWavePanel");
+const nextWaveNumEl = document.getElementById("nextWaveNum");
+const nextWaveEnemyCountEl = document.getElementById("nextWaveEnemyCount");
+const nextWaveNewSection = document.getElementById("nextWaveNewSection");
+const nextWavePreviewCanvas = document.getElementById("nextWavePreviewCanvas");
+const nextWaveBlurbEl = document.getElementById("nextWaveBlurb");
 const railShotSfx = new Audio("assets/rail-shot.mp3");
 const basicTurretShotSfx = new Audio("assets/basic_turret.mp3");
 const rocketTurretShotSfx = new Audio("assets/rocket_tower.mp3");
 const iceTurretShotSfx = new Audio("assets/ice_turret.mp3");
 const frostAuraSfx = new Audio("assets/frost_aura.mp3");
 
+// --- Grid & visual constants (canvas is 900×520; COLS/ROWS derive from TILE_SIZE) ---
 const TILE_SIZE = 52;
 const COLS = Math.floor(canvas.width / TILE_SIZE);
 const ROWS = Math.floor(canvas.height / TILE_SIZE);
@@ -45,9 +72,33 @@ const BUILD_TILE_STROKE = "rgba(25, 70, 25, 0.38)";
 const BUILD_TILE_PATTERN = "rgba(255, 255, 255, 0.06)";
 const FINAL_WAVE = 10;
 const KILL_GOLD = 10;
+const GOLD_POPUP_DURATION_SEC = 0.95;
+const GOLD_POPUP_RISE_PX_PER_SEC = 36;
 const WAVE_BASE_BONUS_START = 20;
 const WAVE_BASE_BONUS_STEP = 10;
 const WAVE_FLAWLESS_BONUS = 10;
+/** Full-screen red tint when an enemy leaks; fades using performance.now() in draw(). */
+const BASE_DAMAGE_FLASH_MS = 320;
+const BASE_DAMAGE_FLASH_MAX_ALPHA = 0.12;
+const HOLD_F_SELL_STORAGE_KEY = "geomDefense_holdFSell";
+
+function loadHoldFSell() {
+  try {
+    return localStorage.getItem(HOLD_F_SELL_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveHoldFSell(value) {
+  try {
+    localStorage.setItem(HOLD_F_SELL_STORAGE_KEY, value ? "1" : "0");
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+let holdFSell = loadHoldFSell();
 const AUDIO_MAX_LEVEL = 10;
 const BASE_MUSIC_VOLUME = 0.5;
 const BASE_SFX_VOLUME = {
@@ -57,16 +108,18 @@ const BASE_SFX_VOLUME = {
   ice: 0.32,
   frostAura: 0.24
 };
-const TOWER_MENU_ORDER = ["basic", "ice", "frost", "rocket", "rail"];
+const TOWER_MENU_ORDER = ["basic", "ice", "frost", "rocket", "rail"]; // matches keyboard 1–5
+
+// --- Tower definitions: stats + UI strings; Tower instances copy these at build time ---
 const TOWER_TYPES = {
   basic: {
     id: "basic",
     name: "Basic Turret",
     description:
-      "Reliable single-target damage; shoots the enemy farthest along the path.\nStats:\nCost: 100g,\nRange: 145,\nDamage: 15,\nShot Interval: 1s,\nProjectile speed 340,\nTarget Prio: Lead enemy.\nMax 6 towers.",
+      "Reliable single-target damage; shoots the enemy nearest the base (least distance left along the path).\nStats:\nCost: 100g,\nRange: 145,\nDamage: 20,\nShot Interval: 1s,\nProjectile speed 340,\nTarget Prio: Closest to base along path.\nMax 6 towers.",
     cost: 100,
     range: 145,
-    damage: 15,
+    damage: 20,
     fireRate: 1,
     color: "#2563eb",
     barrelColor: "#93c5fd",
@@ -85,7 +138,7 @@ const TOWER_TYPES = {
     color: "#0891b2",
     barrelColor: "#67e8f9",
     aura: true,
-    slowAmount: 0.25,
+    slowAmount: 0.35,
     slowDuration: 0.22,
     maxCount: 2
   },
@@ -93,11 +146,11 @@ const TOWER_TYPES = {
     id: "ice",
     name: "Ice Turret",
     description:
-      "Snowflake shots; skips enemies recently hit by Ice (spreads chill). In a Frost Aura, hits apply 35% slow instead of 25%.\nStats:\nCost: 150g,\nRange: 130,\nDamage: 10,\nShot Interval: 2s,\nProjectile speed 320,\nOn hit: 25% slow for 1s (35% in Frost Aura),\nTarget Prio: Lead enemy without recent Ice hit.\nMax 4 towers.",
+      "Snowflake shots; skips enemies recently hit by Ice (spreads chill). In a Frost Aura, hits apply 35% slow instead of 25%.\nStats:\nCost: 150g,\nRange: 130,\nDamage: 20,\nShot Interval: 2s,\nProjectile speed 320,\nOn hit: 25% slow for 1s (35% in Frost Aura),\nTarget Prio: Closest to base along path (skips recent Ice hit).\nMax 4 towers.",
     cost: 150,
     range: 130,
-    damage: 10,
-    fireRate: 2,
+    damage: 20,
+    fireRate: 1.5,
     color: "#06b6d4",
     barrelColor: "#a5f3fc",
     projectileColor: "#67e8f9",
@@ -115,7 +168,7 @@ const TOWER_TYPES = {
       "Splash damage aimed at the highest-HP enemy in range.\nStats:\nCost: 300g,\nRange: 175,\nDamage: 25,\nShot Interval: 2s,\nProjectile speed 290,\nSplash: 3 tiles,\nTarget Prio: Highest HP.\nMax 2 towers.",
     cost: 300,
     range: 175,
-    damage: 25,
+    damage: 35,
     fireRate: 2,
     color: "#7c3aed",
     barrelColor: "#c4b5fd",
@@ -144,6 +197,7 @@ const TOWER_TYPES = {
   }
 };
 
+// --- Map picker metadata (ids must match buildMapLayout branches) ---
 const MAP_CATALOG = [
   {
     id: "snake",
@@ -158,10 +212,11 @@ const MAP_CATALOG = [
   {
     id: "trident",
     name: "Trident (Hard)",
-    blurb: "Three top spawns funnel into one lane to the base."
+    blurb: "Three top spawns merge, then a straight run to the base at bottom-right."
   }
 ];
 
+// --- Mutable runtime state: one object the whole game reads/writes (not a framework store) ---
 const state = {
   wave: 1,
   gold: 250,
@@ -183,11 +238,15 @@ const state = {
   waveConfig: null,
   gameWon: false,
   gameOverTracked: false,
+  gameOverByBoss: false,
   speedMultiplier: 1,
   difficultyHpMultiplier: 1,
-  gameStarted: false
+  gameStarted: false,
+  baseDamageFlashUntil: 0,
+  goldPopups: []
 };
 
+// --- Analytics (Google tag; no-op if gtag missing) ---
 function trackEvent(name, params = {}) {
   if (typeof window.gtag !== "function") {
     return;
@@ -200,6 +259,8 @@ basicTurretShotSfx.preload = "auto";
 rocketTurretShotSfx.preload = "auto";
 iceTurretShotSfx.preload = "auto";
 frostAuraSfx.preload = "auto";
+
+// --- Audio: master mute + per-channel levels; applyAudioVolumes pushes into Audio elements ---
 const audioSettings = {
   muted: false,
   sfxLevel: 5,
@@ -304,6 +365,7 @@ function playFrostAuraSfx() {
   }
 }
 
+// --- Map runtime: set by applyMapLayout(mapName) whenever map changes ---
 let selectedMap;
 let pathGrid;
 let pathLaneGrid;
@@ -312,6 +374,7 @@ let endPoint;
 let buildableGrid;
 let spawnMarkers;
 
+// --- Optional full-bleed background for the snake map (decorative; drawGrid may skip path fill) ---
 const snakeMapBg = new Image();
 let snakeMapBgLoaded = false;
 snakeMapBg.onload = () => {
@@ -322,6 +385,7 @@ snakeMapBg.onerror = () => {
 };
 snakeMapBg.src = "assets/snake-map-bg.png";
 
+// --- Map geometry: tile lists → grids and pixel paths for enemies ---
 function computeSpawnMarkers(paths) {
   const list = [];
   const seen = new Set();
@@ -342,6 +406,7 @@ function computeSpawnMarkers(paths) {
   return list;
 }
 
+/** Rebuilds all map-derived data after picking a map (menu or mid-game reset). */
 function applyMapLayout(mapName) {
   selectedMap = buildMapLayout(mapName);
   pathGrid = createPathGrid(selectedMap.pathTiles);
@@ -352,6 +417,7 @@ function applyMapLayout(mapName) {
   spawnMarkers = computeSpawnMarkers(mapPathOptions);
 }
 
+/** Tile coordinates [x,y] for the "fork" map (two lanes merging). */
 function pathForkMergePaths() {
   const top = [];
   for (let x = 0; x <= 8; x += 1) {
@@ -379,6 +445,7 @@ function pathForkMergePaths() {
   };
 }
 
+/** Tile coordinates for the "trident" map (three spawns → one trunk → base bottom-right). */
 function pathTridentPaths() {
   const cx = 8;
   const yMerge = 4;
@@ -387,6 +454,9 @@ function pathTridentPaths() {
   const tail = [];
   for (let y = yMerge + 1; y <= ROWS - 1; y += 1) {
     tail.push([cx, y]);
+  }
+  for (let x = cx + 1; x <= COLS - 1; x += 1) {
+    tail.push([x, ROWS - 1]);
   }
   const left = [];
   for (let y = 0; y <= yMerge; y += 1) {
@@ -426,6 +496,7 @@ function dedupeConsecutiveTiles(tiles) {
   return out;
 }
 
+/** Single winding path for the "snake" map; built from horizontal/vertical segments. */
 function pathSnakeS() {
   const tiles = [];
   const add = (x, y) => {
@@ -458,6 +529,7 @@ function pathSnakeS() {
   return dedupeConsecutiveTiles(tiles);
 }
 
+/** Returns { paths, pathTiles, startTile, endTile, mapName } for a catalog id. */
 function buildMapLayout(mapName) {
   let mapDef;
   if (mapName === "trident") {
@@ -489,6 +561,7 @@ function buildMapLayout(mapName) {
   };
 }
 
+/** 2D array: 1 = path tile, 0 = buildable grass. */
 function createPathGrid(pathTiles) {
   const grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
   for (const [x, y] of pathTiles) {
@@ -499,6 +572,7 @@ function createPathGrid(pathTiles) {
   return grid;
 }
 
+// --- Path rendering: lane colors when 1, 2, or 3+ paths share a tile ---
 const LANE_PALETTES = [
   { base: "#e8c896", deep: "#b8863d", edge: "rgba(100, 55, 18, 0.58)", highlight: "rgba(255, 248, 220, 0.22)" },
   { base: "#d4a574", deep: "#8b5a2a", edge: "rgba(85, 45, 12, 0.58)", highlight: "rgba(255, 235, 200, 0.18)" },
@@ -513,6 +587,7 @@ const PATH_MERGE = {
   stripeB: "rgba(40, 25, 10, 0.12)"
 };
 
+/** Each cell lists which path indices pass through (for merge coloring). */
 function createPathLaneGrid(pathsAsTiles) {
   const grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
   for (let pathIndex = 0; pathIndex < pathsAsTiles.length; pathIndex += 1) {
@@ -540,6 +615,7 @@ function sortedLaneIds(cell) {
   return [...new Set(cell)].sort((a, b) => a - b);
 }
 
+/** Lane-colored dirt path (used for previews / tooling; main drawGrid uses snake-style tiles). */
 function drawPathTile(px, py, x, y) {
   let lanes = sortedLaneIds(pathLaneGrid[y][x]);
   if (lanes.length <= 0) {
@@ -611,6 +687,7 @@ function drawPathTile(px, py, x, y) {
   ctx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
 }
 
+/** Brown edge lines between path and grass (non-snake maps). */
 function drawPathGrassDividers(px, py, x, y) {
   const w = 2.5;
   ctx.lineCap = "square";
@@ -648,6 +725,7 @@ function drawPathGrassDividers(px, py, x, y) {
   });
 }
 
+/** Softer dividers used with the snake map’s stone path look. */
 function drawSnakePathGrassDividers(px, py, x, y) {
   const w = 2;
   ctx.lineCap = "square";
@@ -762,6 +840,7 @@ function drawSnakeMapLabels() {
   ctx.fillText("END", end.x, endLabelY);
 }
 
+// --- Tile space ↔ canvas pixel space (centers of tiles) ---
 function toPixelPoint(tile) {
   return {
     x: tile[0] * TILE_SIZE + TILE_SIZE / 2,
@@ -773,10 +852,12 @@ function toPixelPath(pathTiles) {
   return pathTiles.map((tile) => toPixelPoint(tile));
 }
 
+/** true where pathGrid is 0 — only those cells accept new towers. */
 function createBuildableGrid(grid) {
   return grid.map((row) => row.map((cell) => cell === 0));
 }
 
+// --- Enemy: follows pathPoints in order; slow timers stack visually via slowMultiplier ---
 class Enemy {
   constructor(config, pathPoints) {
     this.maxHp = config.hp;
@@ -853,9 +934,21 @@ class Enemy {
     const t = performance.now() * 0.007;
     const bob = Math.sin(t + this.x * 0.04 + this.y * 0.03) * 1.4;
     const wobble = Math.sin(t * 1.2 + this.pathIndex * 0.35 + this.x * 0.02) * 0.05;
+    const slowed = this.slowTimer > 0 || this.iceSlowTimer > 0;
+    const now = performance.now();
     ctx.save();
     ctx.translate(this.x, this.y + bob);
     ctx.rotate(wobble);
+    if (slowed) {
+      const chill = ctx.createRadialGradient(0, 0, this.radius * 0.2, 0, 0, this.radius + 10);
+      chill.addColorStop(0, "rgba(207, 250, 254, 0.14)");
+      chill.addColorStop(0.55, "rgba(103, 232, 249, 0.06)");
+      chill.addColorStop(1, "rgba(103, 232, 249, 0)");
+      ctx.fillStyle = chill;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.radius + 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = bodyColor;
     if (this.shape === "triangle") {
       ctx.beginPath();
@@ -874,7 +967,31 @@ class Enemy {
     }
 
     if (this.isBoss) {
-      drawBossFace(0, 0, this.radius);
+      drawBossFace(ctx, 0, 0, this.radius);
+    }
+
+    if (slowed) {
+      const ringR = this.radius + 3 + Math.sin(now * 0.006 + this.x * 0.1) * 0.8;
+      const pulse = 0.32 + 0.12 * Math.sin(now * 0.005);
+      ctx.strokeStyle = `rgba(34, 211, 238, ${pulse})`;
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([3, 5]);
+      ctx.lineDashOffset = -(now * 0.04) % 16;
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+      for (let k = 0; k < 3; k += 1) {
+        const ang = now * 0.0022 + k * ((Math.PI * 2) / 3);
+        const pr = ringR + 1.5;
+        const sx = Math.cos(ang) * pr;
+        const sy = Math.sin(ang) * pr;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     ctx.fillStyle = "#1f2937";
@@ -885,6 +1002,7 @@ class Enemy {
   }
 }
 
+// --- Tower: non-aura towers use findTarget + cooldown; frost applies slow every frame in range ---
 class Tower {
   constructor(tileX, tileY, typeId) {
     const type = TOWER_TYPES[typeId] || TOWER_TYPES.basic;
@@ -989,8 +1107,27 @@ class Tower {
       return this.findRailTarget();
     }
     let best = null;
-    let bestMetric = -1;
 
+    if (this.targetMode === "highestHp") {
+      let bestHp = -1;
+      for (const enemy of state.enemies) {
+        const dist = Math.hypot(enemy.x - this.x, enemy.y - this.y);
+        if (dist > this.range) {
+          continue;
+        }
+        if (this.typeId === "ice" && enemy.iceSlowTimer > 0) {
+          continue;
+        }
+        if (enemy.hp > bestHp) {
+          best = enemy;
+          bestHp = enemy.hp;
+        }
+      }
+      return best;
+    }
+
+    // progress: enemy closest to base wins (minimum remaining distance along path)
+    let bestRemaining = Infinity;
     for (const enemy of state.enemies) {
       const dist = Math.hypot(enemy.x - this.x, enemy.y - this.y);
       if (dist > this.range) {
@@ -999,10 +1136,16 @@ class Tower {
       if (this.typeId === "ice" && enemy.iceSlowTimer > 0) {
         continue;
       }
-      const metric = this.targetMode === "highestHp" ? enemy.hp : enemy.pathIndex;
-      if (metric > bestMetric) {
+      const remaining = getEnemyRemainingPathDistance(enemy);
+      if (remaining < bestRemaining) {
         best = enemy;
-        bestMetric = metric;
+        bestRemaining = remaining;
+      } else if (
+        best !== null &&
+        Math.abs(remaining - bestRemaining) < 0.02 &&
+        enemy.pathIndex > best.pathIndex
+      ) {
+        best = enemy;
       }
     }
 
@@ -1012,7 +1155,7 @@ class Tower {
   findRailTarget() {
     let best = null;
     let bestCount = -1;
-    let bestTie = -1;
+    let bestTieRemaining = Infinity;
 
     for (const enemy of state.enemies) {
       if (enemy.hp <= 0) {
@@ -1033,10 +1176,10 @@ class Tower {
       const startX = this.x + dirX * 22;
       const startY = this.y + dirY * 22;
       const cnt = countEnemiesOnRailLine(startX, startY, dirX, dirY, this.x, this.y, this.range);
-      const tie = enemy.pathIndex;
-      if (cnt > bestCount || (cnt === bestCount && tie > bestTie)) {
+      const remaining = getEnemyRemainingPathDistance(enemy);
+      if (cnt > bestCount || (cnt === bestCount && remaining < bestTieRemaining)) {
         bestCount = cnt;
-        bestTie = tie;
+        bestTieRemaining = remaining;
         best = enemy;
       }
     }
@@ -1119,6 +1262,274 @@ class Tower {
     ctx.stroke();
   }
 
+  drawBasicTurret() {
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 4.2);
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.aimAngle + Math.PI / 2);
+
+    ctx.fillStyle = "#1e3a5f";
+    ctx.beginPath();
+    ctx.moveTo(-20, 14);
+    ctx.lineTo(20, 14);
+    ctx.lineTo(16, 20);
+    ctx.lineTo(-16, 20);
+    ctx.closePath();
+    ctx.fill();
+
+    const hullGrad = ctx.createLinearGradient(0, -12, 0, 12);
+    hullGrad.addColorStop(0, "#3b82f6");
+    hullGrad.addColorStop(0.5, this.color);
+    hullGrad.addColorStop(1, "#1e40af");
+    ctx.fillStyle = hullGrad;
+    ctx.beginPath();
+    ctx.moveTo(-14, 10);
+    ctx.lineTo(14, 10);
+    ctx.lineTo(12, -8);
+    ctx.lineTo(-12, -8);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(147, 197, 253, 0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    const barrelGrad = ctx.createLinearGradient(0, -8, 0, -26);
+    barrelGrad.addColorStop(0, "#60a5fa");
+    barrelGrad.addColorStop(0.6, this.barrelColor);
+    barrelGrad.addColorStop(1, "#1d4ed8");
+    ctx.fillStyle = barrelGrad;
+    ctx.fillRect(-5, -24, 10, 16);
+    ctx.fillStyle = "rgba(30, 64, 175, 0.6)";
+    ctx.fillRect(-5, -18, 10, 2);
+    ctx.fillRect(-5, -12, 10, 2);
+
+    ctx.fillStyle = `rgba(254, 240, 138, ${0.35 + 0.35 * pulse})`;
+    ctx.beginPath();
+    ctx.arc(0, -26, 2.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, -26, 4 + pulse, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  drawIceTurret() {
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 3.5);
+    const shimmer = 0.92 + 0.08 * Math.sin(t * 5);
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.aimAngle + Math.PI / 2);
+
+    ctx.fillStyle = "#0c4a6e";
+    ctx.beginPath();
+    ctx.moveTo(-18, 16);
+    ctx.lineTo(18, 16);
+    ctx.lineTo(14, 22);
+    ctx.lineTo(-14, 22);
+    ctx.closePath();
+    ctx.fill();
+
+    const hullGrad = ctx.createLinearGradient(-12, -10, 12, 10);
+    hullGrad.addColorStop(0, "#0891b2");
+    hullGrad.addColorStop(0.45, this.color);
+    hullGrad.addColorStop(1, "#155e75");
+    ctx.fillStyle = hullGrad;
+    ctx.beginPath();
+    ctx.moveTo(-13, 10);
+    ctx.lineTo(13, 10);
+    ctx.lineTo(11, -6);
+    ctx.lineTo(-11, -6);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(165, 243, 252, 0.55)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    ctx.strokeStyle = `rgba(207, 250, 254, ${0.4 * shimmer})`;
+    ctx.lineWidth = 1;
+    for (let s = -1; s <= 1; s += 2) {
+      ctx.beginPath();
+      ctx.moveTo(s * 11, -4);
+      ctx.lineTo(s * 15, -14);
+      ctx.lineTo(s * 12, -16);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    ctx.shadowColor = "rgba(103, 232, 249, 0.55)";
+    ctx.shadowBlur = 6 + 8 * pulse;
+    const barrelGrad = ctx.createLinearGradient(0, -6, 0, -28);
+    barrelGrad.addColorStop(0, "#a5f3fc");
+    barrelGrad.addColorStop(1, "#06b6d4");
+    ctx.fillStyle = barrelGrad;
+    ctx.fillRect(-4.5, -26, 9, 20);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+    ctx.beginPath();
+    ctx.arc(0, -26, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(125, 211, 252, ${0.35 + 0.25 * pulse})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-3, -10);
+    ctx.lineTo(3, -10);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  drawRocketTurret() {
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 2.8);
+    const flicker = 0.85 + 0.15 * Math.sin(t * 6.2);
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.aimAngle + Math.PI / 2);
+
+    ctx.fillStyle = "#4c1d95";
+    ctx.beginPath();
+    ctx.moveTo(-22, 15);
+    ctx.lineTo(22, 15);
+    ctx.lineTo(18, 21);
+    ctx.lineTo(-18, 21);
+    ctx.closePath();
+    ctx.fill();
+
+    const hullGrad = ctx.createLinearGradient(0, -8, 0, 12);
+    hullGrad.addColorStop(0, "#8b5cf6");
+    hullGrad.addColorStop(0.45, this.color);
+    hullGrad.addColorStop(1, "#5b21b6");
+    ctx.fillStyle = hullGrad;
+    ctx.beginPath();
+    ctx.moveTo(-15, 10);
+    ctx.lineTo(15, 10);
+    ctx.lineTo(13, -4);
+    ctx.lineTo(-13, -4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(196, 181, 253, 0.45)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = "#6d28d9";
+    ctx.beginPath();
+    ctx.moveTo(-16, 2);
+    ctx.lineTo(-22, 8);
+    ctx.lineTo(-18, 10);
+    ctx.lineTo(-14, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(16, 2);
+    ctx.lineTo(22, 8);
+    ctx.lineTo(18, 10);
+    ctx.lineTo(14, 4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.shadowColor = "rgba(249, 115, 22, 0.75)";
+    ctx.shadowBlur = 10 + 12 * pulse;
+    ctx.fillStyle = `rgba(251, 146, 60, ${0.55 * flicker})`;
+    ctx.beginPath();
+    ctx.ellipse(0, -6, 7, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    const barrelGrad = ctx.createLinearGradient(0, -4, 0, -30);
+    barrelGrad.addColorStop(0, "#c4b5fd");
+    barrelGrad.addColorStop(0.5, this.barrelColor);
+    barrelGrad.addColorStop(1, "#5b21b6");
+    ctx.fillStyle = barrelGrad;
+    ctx.fillRect(-6, -28, 12, 24);
+    ctx.fillStyle = "#7c3aed";
+    ctx.fillRect(-6, -16, 12, 3);
+
+    ctx.fillStyle = this.projectileColor || "#f97316";
+    ctx.globalAlpha = 0.45 + 0.35 * pulse;
+    ctx.beginPath();
+    ctx.arc(0, -30, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    ctx.strokeStyle = "rgba(254, 215, 170, 0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, -30, 5 + pulse * 0.8, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  drawRailTurret() {
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 5.5);
+    const arcPhase = Math.sin(t * 8);
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.aimAngle + Math.PI / 2);
+
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(-24, 14, 48, 8);
+    ctx.fillStyle = "#334155";
+    ctx.fillRect(-20, 16, 40, 4);
+
+    const hullGrad = ctx.createLinearGradient(-14, -6, 14, 10);
+    hullGrad.addColorStop(0, "#64748b");
+    hullGrad.addColorStop(0.4, this.color);
+    hullGrad.addColorStop(1, "#1e293b");
+    ctx.fillStyle = hullGrad;
+    ctx.fillRect(-16, -6, 32, 16);
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.4)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-16.5, -6.5, 33, 17);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(-10, 2, 6, 5);
+    ctx.fillRect(4, 2, 6, 5);
+
+    ctx.fillStyle = "#334155";
+    ctx.fillRect(-18, -2, 4, 8);
+    ctx.fillRect(14, -2, 4, 8);
+
+    const railGrad = ctx.createLinearGradient(0, -18, 0, -32);
+    railGrad.addColorStop(0, "#fde68a");
+    railGrad.addColorStop(0.35, this.barrelColor);
+    railGrad.addColorStop(1, "#92400e");
+    ctx.fillStyle = railGrad;
+    ctx.fillRect(-18, -22, 36, 6);
+    ctx.fillRect(-4, -30, 8, 12);
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+    ctx.fillRect(-17, -21, 34, 2);
+    ctx.fillRect(-17, -19, 34, 2);
+
+    ctx.strokeStyle = `rgba(251, 191, 36, ${0.4 + 0.35 * pulse})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-14 + arcPhase * 2, -24);
+    ctx.lineTo(14 - arcPhase * 2, -28);
+    ctx.stroke();
+
+    ctx.shadowColor = "rgba(251, 191, 36, 0.6)";
+    ctx.shadowBlur = 4 + 6 * pulse;
+    ctx.fillStyle = "#fcd34d";
+    ctx.fillRect(-3, -32, 6, 3);
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+  }
+
   draw() {
     if (this.aura) {
       if (this.typeId === "frost") {
@@ -1139,22 +1550,34 @@ class Tower {
       ctx.fillRect(this.x - 14, this.y - 14, 28, 28);
       return;
     }
+    if (this.typeId === "basic") {
+      this.drawBasicTurret();
+      return;
+    }
+    if (this.typeId === "ice") {
+      this.drawIceTurret();
+      return;
+    }
+    if (this.typeId === "rocket") {
+      this.drawRocketTurret();
+      return;
+    }
+    if (this.typeId === "rail") {
+      this.drawRailTurret();
+      return;
+    }
     ctx.fillStyle = this.color;
     ctx.fillRect(this.x - 14, this.y - 14, 28, 28);
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.aimAngle + Math.PI / 2);
     ctx.fillStyle = this.barrelColor;
-    if (this.typeId === "rail") {
-      ctx.fillRect(-16, -20, 32, 5);
-      ctx.fillRect(-3, -24, 6, 10);
-    } else {
-      ctx.fillRect(-4, -20, 8, 10);
-    }
+    ctx.fillRect(-4, -20, 8, 10);
     ctx.restore();
   }
 }
 
+// --- Standard projectile: homing shot; on hit calls damageEnemy (ice checks frost synergy here) ---
 class Projectile {
   constructor(x, y, target, config) {
     this.x = x;
@@ -1250,6 +1673,7 @@ class Projectile {
   }
 }
 
+// --- Rail aiming: ray vs circle for “how many enemies does this beam line hit?” ---
 function segmentHitsCircle(x1, y1, x2, y2, cx, cy, r) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -1283,6 +1707,7 @@ function countEnemiesOnRailLine(startX, startY, dirX, dirY, towerX, towerY, rang
   return count;
 }
 
+/** Moves along a line; pierces each enemy once per shot; bonus dmg vs boss/square in update(). */
 class RailProjectile {
   constructor(sx, sy, dirX, dirY, speed, damage) {
     this.x = sx;
@@ -1348,6 +1773,7 @@ class RailProjectile {
   }
 }
 
+/** Short-lived ring drawn after rocket splash (state.effects). */
 class ExplosionEffect {
   constructor(x, y) {
     this.x = x;
@@ -1382,6 +1808,7 @@ class ExplosionEffect {
   }
 }
 
+// --- Wave flow: startWave arms counters; update() drives spawnEnemy until quota met ---
 function startWave() {
   if (!state.gameStarted || state.waveInProgress || state.baseHp <= 0 || state.gameWon || state.wave > FINAL_WAVE) {
     return;
@@ -1422,6 +1849,7 @@ function spawnEnemy() {
   state.enemiesSpawnedThisWave += 1;
 }
 
+/** Visual/variant stats layered on top of getWaveConfig base numbers. */
 function getEnemyTypeForWave(wave) {
   // Keep boss wave as dedicated boss enemy.
   if (wave === 10) {
@@ -1465,6 +1893,7 @@ function getEnemyTypeForWave(wave) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
+/** Per-wave enemy count, HP, speed, spawn gap, boss flag — main difficulty curve. */
 function getWaveConfig(wave) {
   // Waves 1-9: steadily increase count and HP so each wave feels harder.
   if (wave <= 9) {
@@ -1483,10 +1912,10 @@ function getWaveConfig(wave) {
   if (wave === 10) {
     return {
       enemyCount: 1,
-      hp: 2700,
+      hp: 2025,
       speed: 54,
       spawnInterval: 1.2,
-      baseDamage: 5,
+      baseDamage: 19,
       radius: 39,
       isBoss: true,
       color: "#7f1d1d"
@@ -1506,6 +1935,118 @@ function getWaveConfig(wave) {
   };
 }
 
+/** Display name for the wave-10 circle boss (shown in next-wave preview). */
+const BOSS_DISPLAY_NAME = "Zortac CircleFace";
+const BOSS_NEXT_WAVE_BLURB = `Titan Boss Detected: ${BOSS_DISPLAY_NAME}`;
+const DEFEAT_LINE_BOSS = "Zortac was able to break your defenses and encircled the city.";
+const DEFEAT_LINE_REGULAR = "The GeoScourge has taken the city.";
+const VICTORY_LINE_1HP = "Zortac was stopped at the city walls. The GeoScourge is defeated for now...";
+const VICTORY_LINE_ZORTAC = "Zortac has been valiantly defeated. Earth thanks you Commander.";
+
+/** Wave number that will start next (null = hide panel). */
+function getNextWaveNumber() {
+  if (!state.gameStarted || state.gameWon || state.baseHp <= 0) {
+    return null;
+  }
+  if (state.waveInProgress && state.wave >= FINAL_WAVE) {
+    return null;
+  }
+  if (state.waveInProgress) {
+    return state.wave + 1;
+  }
+  if (state.wave > FINAL_WAVE) {
+    return null;
+  }
+  return state.wave;
+}
+
+/** Milestone preview for triangle (wave 3), square (7), boss (10); else null. */
+function getNewEnemyPreview(nextWave) {
+  if (nextWave === FINAL_WAVE) {
+    return {
+      blurb: BOSS_NEXT_WAVE_BLURB,
+      icon: { shape: "circle", color: "#7f1d1d", isBoss: true, radius: 39 }
+    };
+  }
+  if (nextWave === 3) {
+    return {
+      blurb: "Skirmisher: faster movement, lower HP than standard grunts.",
+      icon: { shape: "triangle", color: "#0f766e", isBoss: false, radius: 12 }
+    };
+  }
+  if (nextWave === 7) {
+    return {
+      blurb: "Armored square: higher HP, slower; takes extra damage from rail shots.",
+      icon: { shape: "square", color: "#7c3f00", isBoss: false, radius: 14 }
+    };
+  }
+  return null;
+}
+
+function drawNextWaveEnemyIcon(canvas, iconSpec) {
+  if (!canvas) {
+    return;
+  }
+  const c = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = "rgba(15, 23, 42, 0.55)";
+  c.fillRect(0, 0, w, h);
+  const cx = w / 2;
+  const cy = h / 2 + (iconSpec.isBoss ? 2 : 0);
+  const r = iconSpec.isBoss ? Math.min(20, (Math.min(w, h) / 2) - 4) : iconSpec.shape === "square" ? 15 : iconSpec.shape === "triangle" ? 14 : 14;
+  c.save();
+  c.translate(cx, cy);
+  c.fillStyle = iconSpec.color;
+  if (iconSpec.shape === "triangle") {
+    c.beginPath();
+    c.moveTo(0, -r);
+    c.lineTo(r * 0.9, r * 0.8);
+    c.lineTo(-r * 0.9, r * 0.8);
+    c.closePath();
+    c.fill();
+  } else if (iconSpec.shape === "square") {
+    const side = r * 1.75;
+    c.fillRect(-side / 2, -side / 2, side, side);
+  } else {
+    c.beginPath();
+    c.arc(0, 0, r, 0, Math.PI * 2);
+    c.fill();
+  }
+  if (iconSpec.isBoss) {
+    drawBossFace(c, 0, 0, r);
+  }
+  c.restore();
+}
+
+function updateNextWavePanel() {
+  if (!nextWavePanel || !nextWaveNumEl || !nextWaveEnemyCountEl) {
+    return;
+  }
+  const nw = getNextWaveNumber();
+  if (nw === null) {
+    nextWavePanel.classList.add("hidden");
+    return;
+  }
+  nextWavePanel.classList.remove("hidden");
+  nextWaveNumEl.textContent = String(nw);
+  const cfg = getWaveConfig(nw);
+  nextWaveEnemyCountEl.textContent = String(cfg.enemyCount);
+
+  const preview = getNewEnemyPreview(nw);
+  if (!nextWaveNewSection || !nextWaveBlurbEl) {
+    return;
+  }
+  if (!preview) {
+    nextWaveNewSection.classList.add("hidden");
+    return;
+  }
+  nextWaveNewSection.classList.remove("hidden");
+  nextWaveBlurbEl.textContent = preview.blurb;
+  drawNextWaveEnemyIcon(nextWavePreviewCanvas, preview.icon);
+}
+
 function isEnemyInAnyFrostAura(enemy) {
   for (const tower of state.towers) {
     if (tower.typeId !== "frost" || !tower.aura) {
@@ -1519,6 +2060,7 @@ function isEnemyInAnyFrostAura(enemy) {
   return false;
 }
 
+/** Central hit handler: HP, brief flash, optional slow. */
 function damageEnemy(enemy, damage, slowAmount, slowDuration) {
   enemy.hp -= damage;
   enemy.hitFlashTimer = 0.2;
@@ -1539,6 +2081,7 @@ function darkenHexColor(hex, amount) {
   return `rgb(${dr}, ${dg}, ${db})`;
 }
 
+// --- Small canvas drawing helpers for projectile styles ---
 function drawSnowflakeProjectile(x, y, color) {
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.8;
@@ -1579,6 +2122,26 @@ function drawRocketProjectile(x, y, angle, color) {
   ctx.restore();
 }
 
+/**
+ * Distance left for `enemy` to travel along its polyline to the path end (base).
+ * Comparable across lanes (unlike raw pathIndex when paths have different lengths).
+ */
+function getEnemyRemainingPathDistance(enemy) {
+  const pts = enemy.pathPoints;
+  if (!pts || pts.length < 2) {
+    return 0;
+  }
+  const i = enemy.pathIndex;
+  if (i >= pts.length - 1) {
+    return 0;
+  }
+  let d = Math.hypot(enemy.x - pts[i + 1].x, enemy.y - pts[i + 1].y);
+  for (let j = i + 1; j < pts.length - 1; j += 1) {
+    d += Math.hypot(pts[j + 1].x - pts[j].x, pts[j + 1].y - pts[j].y);
+  }
+  return d;
+}
+
 function getEnemyForwardVector(enemy) {
   const nextPoint = enemy.pathPoints[enemy.pathIndex + 1];
   if (!nextPoint) {
@@ -1595,6 +2158,7 @@ function getEnemyForwardVector(enemy) {
   return { x: dx / length, y: dy / length };
 }
 
+// --- Build / sell: gold checks, capacity, buildableGrid, one tower per tile ---
 function placeTower(tileX, tileY) {
   const towerType = TOWER_TYPES[state.selectedTowerType];
   if (!towerType || state.gold < towerType.cost) {
@@ -1639,6 +2203,7 @@ function sellTower(tileX, tileY) {
   state.towers.splice(towerIndex, 1);
 }
 
+/** Clears wave entities only; keeps towers/gold/wave number (retry current wave). */
 function restartCurrentLevel() {
   if (!state.gameStarted || !state.waveInProgress || state.baseHp <= 0 || state.gameWon) {
     return;
@@ -1646,6 +2211,7 @@ function restartCurrentLevel() {
   state.enemies = [];
   state.projectiles = [];
   state.effects = [];
+  state.goldPopups = [];
   state.waveInProgress = false;
   state.spawning = false;
   state.enemiesSpawnedThisWave = 0;
@@ -1673,7 +2239,17 @@ function inBounds(x, y) {
   return x >= 0 && x < COLS && y >= 0 && y < ROWS;
 }
 
+/**
+ * One simulation step: spawning, entity updates, deaths / base damage, wave completion.
+ * Early exit if game over or victory screen logic has frozen the match.
+ */
 function update(dt) {
+  for (const p of state.goldPopups) {
+    p.life -= dt;
+    p.y -= GOLD_POPUP_RISE_PX_PER_SEC * dt;
+  }
+  state.goldPopups = state.goldPopups.filter((p) => p.life > 0);
+
   if (state.baseHp <= 0 || state.gameWon) {
     return;
   }
@@ -1706,9 +2282,11 @@ function update(dt) {
   for (const enemy of state.enemies) {
     if (enemy.reachedBase) {
       state.baseHp -= enemy.baseDamage;
+      state.baseDamageFlashUntil = performance.now() + BASE_DAMAGE_FLASH_MS;
       state.enemiesReachedBaseThisWave += 1;
       if (state.baseHp <= 0) {
         state.gameWon = false;
+        state.gameOverByBoss = Boolean(enemy.isBoss);
         if (!state.gameOverTracked) {
           state.gameOverTracked = true;
           trackEvent("game_over", {
@@ -1722,6 +2300,13 @@ function update(dt) {
     }
     if (enemy.hp <= 0) {
       state.gold += KILL_GOLD;
+      state.goldPopups.push({
+        x: enemy.x,
+        y: enemy.y - enemy.radius - 6,
+        amount: KILL_GOLD,
+        life: GOLD_POPUP_DURATION_SEC,
+        maxLife: GOLD_POPUP_DURATION_SEC
+      });
       continue;
     }
     aliveEnemies.push(enemy);
@@ -1763,6 +2348,7 @@ function update(dt) {
   }
 }
 
+// --- World drawing (bottom-up paint order is assembled in draw()) ---
 function grassShade(x, y) {
   const h = (x * 17 + y * 31) % 7;
   if (h === 0 || h === 1) {
@@ -1791,6 +2377,7 @@ function drawBuildableGrassTile(px, py, x, y) {
   ctx.setLineDash([]);
 }
 
+/** Background layer + per-tile stone path vs grass (snake map can use a PNG underlay). */
 function drawGrid() {
   const isSnake = selectedMap && selectedMap.mapName === "snake";
   if (isSnake && snakeMapBgLoaded && snakeMapBg.complete) {
@@ -1828,6 +2415,7 @@ function drawGrid() {
   }
 }
 
+/** Direction hints along each lane (skips awkward segments on fork maps). */
 function drawPathArrows() {
   const sharedPrefixLength = getSharedPrefixLength(mapPathOptions);
 
@@ -1899,6 +2487,7 @@ function drawPathArrows() {
   });
 }
 
+/** How many waypoint indices all paths share (fork maps: shared trunk). Used by arrows. */
 function getSharedPrefixLength(paths) {
   if (!paths.length) {
     return 0;
@@ -1916,6 +2505,7 @@ function getSharedPrefixLength(paths) {
   return index;
 }
 
+/** Small markers at path starts (from spawnMarkers). */
 function drawSpawnIndicators() {
   const t = performance.now() / 1000;
   const pulse = 0.75 + 0.25 * Math.sin(t * 2.8);
@@ -1954,11 +2544,13 @@ function drawSpawnIndicators() {
   }
 }
 
+/** Base graphic at endPoint (enemies “reach base” when path ends). */
 function drawBase() {
   ctx.fillStyle = "#dc2626";
   ctx.fillRect(endPoint.x - 18, endPoint.y - 18, 36, 36);
 }
 
+/** Tint when hovering a valid build cell with a tower selected. */
 function drawBuildHighlight() {
   const selectedType = TOWER_TYPES[state.selectedTowerType];
   if (!selectedType || !state.hoveredTile) {
@@ -1987,6 +2579,7 @@ function drawBuildHighlight() {
   ctx.fill();
 }
 
+/** Range ring for the tower under the cursor (read-only feedback). */
 function drawHoveredTowerRange() {
   if (!state.hoveredTile) {
     return;
@@ -2007,6 +2600,26 @@ function drawHoveredTowerRange() {
   ctx.fill();
 }
 
+/** Floating +Ng labels when an enemy is killed (styled like sell refund text). */
+function drawGoldPopups() {
+  if (!state.goldPopups.length) {
+    return;
+  }
+  ctx.font = "bold 14px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const p of state.goldPopups) {
+    const alpha = Math.max(0, Math.min(1, p.life / p.maxLife));
+    const label = `+${p.amount}g`;
+    ctx.strokeStyle = `rgba(15, 23, 42, ${0.75 * alpha})`;
+    ctx.fillStyle = `rgba(250, 204, 21, ${0.98 * alpha})`;
+    ctx.lineWidth = 3;
+    ctx.strokeText(label, p.x, p.y);
+    ctx.fillText(label, p.x, p.y);
+  }
+}
+
+/** Sell mode: follow mouse and show refund preview on towers. */
 function drawSellCursorIndicator() {
   if (!state.sellMode || !state.mouseCanvasPos) {
     return;
@@ -2036,6 +2649,23 @@ function drawSellCursorIndicator() {
   }
 }
 
+/** Brief full-screen red tint when base HP is lost (enemy reached base). */
+function drawBaseDamageFlash() {
+  if (!state.gameStarted || state.gameWon) {
+    return;
+  }
+  const now = performance.now();
+  if (now >= state.baseDamageFlashUntil) {
+    return;
+  }
+  const remaining = state.baseDamageFlashUntil - now;
+  const t = remaining / BASE_DAMAGE_FLASH_MS;
+  const alpha = BASE_DAMAGE_FLASH_MAX_ALPHA * t * t;
+  ctx.fillStyle = `rgba(200, 35, 40, ${alpha})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+/** Full-canvas overlay when baseHp hits 0 (loss). */
 function drawGameOver() {
   if (state.baseHp > 0 || state.gameWon) {
     return;
@@ -2045,11 +2675,15 @@ function drawGameOver() {
   ctx.fillStyle = "#fff";
   ctx.font = "bold 48px Arial";
   ctx.textAlign = "center";
-  ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 10);
+  ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 48);
   ctx.font = "24px Arial";
-  ctx.fillText(`You reached wave ${state.wave}`, canvas.width / 2, canvas.height / 2 + 30);
+  ctx.fillText(`You reached wave ${state.wave}`, canvas.width / 2, canvas.height / 2 - 6);
+  ctx.font = "18px Arial";
+  const defeatLine = state.gameOverByBoss ? DEFEAT_LINE_BOSS : DEFEAT_LINE_REGULAR;
+  ctx.fillText(defeatLine, canvas.width / 2, canvas.height / 2 + 28);
 }
 
+/** Shown after surviving the final wave with base HP left. */
 function drawVictoryScreen() {
   if (!state.gameWon || state.baseHp <= 0) {
     return;
@@ -2059,28 +2693,41 @@ function drawVictoryScreen() {
   ctx.fillStyle = "#fff";
   ctx.font = "bold 46px Arial";
   ctx.textAlign = "center";
-  ctx.fillText("Victory!", canvas.width / 2, canvas.height / 2 - 32);
-  ctx.font = "24px Arial";
-  ctx.fillText("You have stopped the Geometric Menace for now...", canvas.width / 2, canvas.height / 2 + 12);
+  let y = canvas.height / 2 - 72;
+  ctx.fillText("Victory!", canvas.width / 2, y);
+  y += 44;
+  ctx.font = "22px Arial";
+  ctx.fillText("You have stopped the Geometric Menace for now...", canvas.width / 2, y);
+  y += 36;
+  if (state.baseHp === 1) {
+    ctx.font = "17px Arial";
+    ctx.fillText(VICTORY_LINE_1HP, canvas.width / 2, y);
+    y += 30;
+  }
+  ctx.font = "17px Arial";
+  ctx.fillText(VICTORY_LINE_ZORTAC, canvas.width / 2, y);
+  y += 36;
   ctx.font = "20px Arial";
-  ctx.fillText("Press Restart Game to play again.", canvas.width / 2, canvas.height / 2 + 48);
+  ctx.fillText("Press Restart Game to play again.", canvas.width / 2, y);
 }
 
-function drawBossFace(x, y, radius) {
-  ctx.fillStyle = "#111";
-  ctx.beginPath();
-  ctx.arc(x - radius * 0.34, y - radius * 0.22, radius * 0.12, 0, Math.PI * 2);
-  ctx.arc(x + radius * 0.34, y - radius * 0.22, radius * 0.12, 0, Math.PI * 2);
-  ctx.fill();
+/** Boss enemies layer this on top of their shape in Enemy.draw(). */
+function drawBossFace(targetCtx, x, y, radius) {
+  targetCtx.fillStyle = "#111";
+  targetCtx.beginPath();
+  targetCtx.arc(x - radius * 0.34, y - radius * 0.22, radius * 0.12, 0, Math.PI * 2);
+  targetCtx.arc(x + radius * 0.34, y - radius * 0.22, radius * 0.12, 0, Math.PI * 2);
+  targetCtx.fill();
 
-  ctx.strokeStyle = "#111";
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(x - radius * 0.52, y + radius * 0.34);
-  ctx.quadraticCurveTo(x, y + radius * 0.1, x + radius * 0.52, y + radius * 0.34);
-  ctx.stroke();
+  targetCtx.strokeStyle = "#111";
+  targetCtx.lineWidth = 2.5;
+  targetCtx.beginPath();
+  targetCtx.moveTo(x - radius * 0.52, y + radius * 0.34);
+  targetCtx.quadraticCurveTo(x, y + radius * 0.1, x + radius * 0.52, y + radius * 0.34);
+  targetCtx.stroke();
 }
 
+/** Full frame: world → entities → FX → modal overlays. Order matters for z-index. */
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid();
@@ -2102,11 +2749,14 @@ function draw() {
   for (const effect of state.effects) {
     effect.draw();
   }
+  drawGoldPopups();
   drawSellCursorIndicator();
   drawGameOver();
   drawVictoryScreen();
+  drawBaseDamageFlash();
 }
 
+/** Syncs state.* to the HTML HUD and enables/disables buttons each frame. */
 function updateHud() {
   waveEl.textContent = String(state.wave);
   goldEl.textContent = String(state.gold);
@@ -2162,9 +2812,12 @@ function updateHud() {
       button.textContent = `${type.name} (${type.cost}g)${countLabel}`;
     }
   }
+  updateNextWavePanel();
 }
 
 let previous = performance.now();
+
+/** requestAnimationFrame driver: caps dt, applies speed multiplier, update → draw → HUD. */
 function gameLoop(now) {
   if (!state.gameStarted) {
     updateHud();
@@ -2182,6 +2835,7 @@ function gameLoop(now) {
   requestAnimationFrame(gameLoop);
 }
 
+// --- Canvas input: tile pick uses same scaling as CSS-sized canvas ---
 canvas.addEventListener("mousemove", (event) => {
   if (!state.gameStarted) {
     return;
@@ -2217,6 +2871,7 @@ canvas.addEventListener("click", (event) => {
   placeTower(tileX, tileY);
 });
 
+// --- Tower menu: click toggles selected type; capacity/affordability enforced in updateHud ---
 towerButtons.forEach((button) => {
   button.addEventListener("click", () => {
     if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
@@ -2231,6 +2886,7 @@ towerButtons.forEach((button) => {
   });
 });
 
+// --- HUD buttons & global hotkeys ---
 startWaveBtn.addEventListener("click", startWave);
 if (rerollMapBtn) {
   rerollMapBtn.addEventListener("click", () => {
@@ -2299,7 +2955,15 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.code === "KeyF") {
     event.preventDefault();
-    toggleSellMode();
+    if (holdFSell) {
+      if (event.repeat) {
+        return;
+      }
+      state.sellMode = true;
+      state.selectedTowerType = null;
+    } else {
+      toggleSellMode();
+    }
     return;
   }
   if (event.code === "Space") {
@@ -2314,10 +2978,25 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
+window.addEventListener("keyup", (event) => {
+  const tag = event.target && event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    return;
+  }
+  if (!holdFSell || event.code !== "KeyF") {
+    return;
+  }
+  if (!state.gameStarted || state.baseHp <= 0 || state.gameWon) {
+    return;
+  }
+  state.sellMode = false;
+});
+
 let selectedMapIdForStart = null;
 let menuMusicUnlockBound = false;
 let loreTypingTimer = null;
 
+// --- Intro flow: typed lore overlay → map/difficulty overlay → Begin starts match ---
 const LORE_PARAGRAPHS = [
   "Incoming Transmission...",
   "Welcome Commander,",
@@ -2457,6 +3136,7 @@ function bindMenuMusicUnlock() {
   document.addEventListener("keydown", unlock);
 }
 
+/** Bottom-right mute, panel toggle, and range inputs → audioSettings + applyAudioVolumes. */
 function setupAudioControls() {
   refreshAudioHudUi();
   if (muteToggleBtn) {
@@ -2468,7 +3148,18 @@ function setupAudioControls() {
   }
   if (audioSettingsBtn && audioSettingsPanel) {
     audioSettingsBtn.addEventListener("click", () => {
+      const opening = audioSettingsPanel.classList.contains("hidden");
       audioSettingsPanel.classList.toggle("hidden");
+      if (opening && holdFSellCheckbox) {
+        holdFSellCheckbox.checked = holdFSell;
+      }
+    });
+  }
+  if (holdFSellCheckbox) {
+    holdFSellCheckbox.checked = holdFSell;
+    holdFSellCheckbox.addEventListener("change", () => {
+      holdFSell = holdFSellCheckbox.checked;
+      saveHoldFSell(holdFSell);
     });
   }
   if (sfxVolumeSlider) {
@@ -2489,6 +3180,7 @@ function setupAudioControls() {
   }
 }
 
+/** Default numbers for a fresh run (called from Begin and Return to menu paths). */
 function resetGameState() {
   state.wave = 1;
   state.gold = 250;
@@ -2497,6 +3189,7 @@ function resetGameState() {
   state.towers = [];
   state.projectiles = [];
   state.effects = [];
+  state.goldPopups = [];
   state.waveInProgress = false;
   state.spawning = false;
   state.hoveredTile = null;
@@ -2510,10 +3203,13 @@ function resetGameState() {
   state.waveConfig = null;
   state.gameWon = false;
   state.gameOverTracked = false;
+  state.gameOverByBoss = false;
   state.speedMultiplier = 1;
   state.difficultyHpMultiplier = 1;
+  state.baseDamageFlashUntil = 0;
 }
 
+/** Offscreen minimap for each map card on the start screen. */
 function renderMapThumbnail(ctx2, mapName, w, h) {
   const layout = buildMapLayout(mapName);
   const pg = createPathGrid(layout.pathTiles);
@@ -2583,6 +3279,7 @@ function buildMapCards() {
   ensureDefaultMapSelection();
 }
 
+/** Menu mode: hide game, reset selection, preview map layout as fork until user picks. */
 function openStartScreen() {
   state.gameStarted = false;
   selectedMapIdForStart = null;
@@ -2607,6 +3304,7 @@ function openStartScreen() {
   playMenuMusic();
 }
 
+/** Hover tooltips: text comes from each tower’s `description` in TOWER_TYPES. */
 function setupTowerTooltips() {
   if (!towerTooltipEl) {
     return;
@@ -2636,6 +3334,7 @@ function getSelectedDifficulty() {
   return el && el.value === "easy" ? "easy" : "normal";
 }
 
+// --- Begin: applies chosen map, difficulty HP multiplier, closes overlay, sets gameStarted ---
 if (beginGameBtn) {
   beginGameBtn.addEventListener("click", () => {
     if (!selectedMapIdForStart) {
@@ -2656,6 +3355,7 @@ if (beginGameBtn) {
   });
 }
 
+// --- First paint: default map layout for thumbnails/menu; lore plays before real run ---
 applyMapLayout("fork");
 resetGameState();
 state.gameStarted = false;

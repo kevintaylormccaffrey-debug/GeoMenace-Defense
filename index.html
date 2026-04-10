@@ -1,9 +1,11 @@
 <!DOCTYPE html>
+<!-- GeoMenace Defense: static shell; all gameplay lives in game.js + canvas. -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GeoMenace Defense</title>
+  <!-- Analytics (optional for local play; game.js calls gtag when present) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-C1N9ZTMCXP"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
@@ -11,14 +13,17 @@
     gtag("js", new Date());
     gtag("config", "G-C1N9ZTMCXP");
   </script>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
+  <!-- Menu / intro music; started from game.js after user gesture (autoplay rules) -->
   <audio id="menuMusic" src="assets/menu-theme.mp3" preload="auto" loop></audio>
+  <!-- Full-screen intro story; any key/click continues to #startOverlay -->
   <div id="loreOverlay" class="lore-overlay" aria-live="polite">
     <div id="loreTransmissionText" class="lore-transmission"></div>
     <p class="lore-continue-hint">Press any button to continue.</p>
   </div>
+  <!-- Map + difficulty; Begin sets state.gameStarted in game.js -->
   <div id="startOverlay" class="start-overlay hidden">
     <div class="start-card">
       <h1 class="start-title">GeoMenace Defense</h1>
@@ -45,14 +50,15 @@
     </div>
   </div>
 
+  <!-- Follows cursor when hovering tower buttons; filled from TOWER_TYPES[].description -->
   <div id="towerTooltip" class="tower-tooltip hidden" role="tooltip"></div>
 
+  <!-- In-game HUD + tower panel; stats ids are updated every frame in updateHud() -->
   <main class="app">
     <section class="hud">
       <h1>GeoMenace Defense</h1>
       <div class="stats">
         <span>Wave: <strong id="wave">1</strong></span>
-        <span>Base HP: <strong id="baseHp">20</strong></span>
         <span>Enemies Left: <strong id="remaining">0</strong></span>
         <span>Turrets: <strong id="turretCounts">Basic 0/6, Ice 0/4, Frost 0/2, Rocket 0/2, Rail 0/1</strong></span>
       </div>
@@ -65,15 +71,28 @@
         <button id="restartBtn" class="restart-btn hidden" type="button">Restart Game</button>
       </div>
       <p class="tip">
-        Select a turret from the menu, then click a buildable tile to place it. Keys <strong>1–5</strong> pick towers top to bottom; <strong>F</strong> toggles sell mode; <strong>Space</strong> starts the wave. Game speed cycles ×1 → ×2 → ×4 on the speed button. Use Restart Level during a wave to try that wave again (keeps your towers and gold).
+        Select a turret from the menu, then click a buildable tile to place it. Keys <strong>1–5</strong> pick towers top to bottom; <strong>F</strong> toggles sell mode (or hold <strong>F</strong> if enabled under ⚙); <strong>Space</strong> starts the wave. Game speed cycles ×1 → ×2 → ×4 on the speed button. Use Restart Level during a wave to try that wave again (keeps your towers and gold).
       </p>
     </section>
 
     <section class="game-layout">
       <aside class="tower-panel">
-        <div class="tower-gold-card">Gold: <strong id="gold">250</strong></div>
+        <div class="tower-resource-card">
+          <div class="tower-resource-row tower-resource-row--gold">
+            <span class="tower-resource-label">Gold</span>
+            <strong id="gold" class="tower-resource-value tower-resource-value--gold">250</strong>
+          </div>
+          <div class="tower-resource-row tower-resource-row--hp" title="Base hit points remaining">
+            <span class="tower-resource-hp-label">
+              <span class="tower-hp-heart" aria-hidden="true">♥</span>
+              <span class="tower-resource-label">Base</span>
+            </span>
+            <strong id="baseHp" class="tower-resource-value tower-resource-value--hp">20</strong>
+          </div>
+        </div>
         <h2>Tower Menu</h2>
         <p class="tower-menu-hint"><span class="hint-bubble" aria-hidden="true">i</span> Hover a tower for full stats and behavior.</p>
+        <!-- data-tower-type must match keys in game.js TOWER_TYPES -->
         <div class="tower-menu" id="towerMenu">
           <button class="tower-btn" data-tower-type="basic" type="button">Basic Turret (100g)</button>
           <button class="tower-btn" data-tower-type="ice" type="button">Ice Turret (150g)</button>
@@ -84,11 +103,28 @@
       </aside>
 
       <div class="game-stage">
+        <div id="nextWavePanel" class="next-wave-panel hidden" aria-live="polite">
+          <div class="next-wave-heading">Next wave</div>
+          <div class="next-wave-line">
+            <span>Wave <strong id="nextWaveNum">1</strong></span>
+            <span class="next-wave-sep" aria-hidden="true">·</span>
+            <span><strong id="nextWaveEnemyCount">8</strong> enemies</span>
+          </div>
+          <div id="nextWaveNewSection" class="next-wave-new hidden">
+            <div class="next-wave-new-badge">New enemy</div>
+            <div class="next-wave-new-body">
+              <canvas id="nextWavePreviewCanvas" width="64" height="64" aria-hidden="true"></canvas>
+              <p id="nextWaveBlurb" class="next-wave-blurb"></p>
+            </div>
+          </div>
+        </div>
+        <!-- Internal resolution fixed; CSS scales it. game.js uses width/height for COLS/ROWS. -->
         <canvas id="gameCanvas" width="900" height="520" aria-label="GeoMenace Defense game area"></canvas>
       </div>
     </section>
   </main>
 
+  <!-- Fixed controls; volumes read in setupAudioControls() -->
   <div class="audio-hud">
     <button id="muteToggleBtn" type="button" class="audio-icon-btn" aria-label="Mute all audio" title="Mute all audio">🔊</button>
     <button id="audioSettingsBtn" type="button" class="audio-icon-btn" aria-label="Audio settings" title="Audio settings">⚙️</button>
@@ -101,6 +137,12 @@
         <span id="musicVolumeLabel">Music: 5</span>
         <input id="musicVolumeSlider" type="range" min="0" max="10" value="5">
       </label>
+      <div class="audio-settings-divider" aria-hidden="true"></div>
+      <label class="audio-settings-toggle-row" for="holdFSellCheckbox">
+        <input type="checkbox" id="holdFSellCheckbox">
+        <span class="audio-settings-toggle-label">Hold <kbd class="kbd-hint">F</kbd> to sell</span>
+      </label>
+      <p class="audio-settings-hint">Off: <kbd class="kbd-hint">F</kbd> toggles sell mode.</p>
     </div>
   </div>
 

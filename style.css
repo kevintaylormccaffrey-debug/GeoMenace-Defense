@@ -1,7 +1,10 @@
+/* GeoMenace Defense — layout and chrome. Game canvas drawing colors are mostly in game.js. */
+
 * {
   box-sizing: border-box;
 }
 
+/* Page shell */
 body {
   margin: 0;
   font-family: Arial, sans-serif;
@@ -9,6 +12,7 @@ body {
   color: #e8edf2;
 }
 
+/* Centered column for HUD + game row */
 .app {
   max-width: 1180px;
   margin: 0 auto;
@@ -19,6 +23,7 @@ body {
   margin-bottom: 12px;
 }
 
+/* Title + stat row + control buttons */
 h1 {
   margin: 0 0 8px;
   font-size: 1.5rem;
@@ -43,6 +48,7 @@ h1 {
   gap: 8px;
 }
 
+/* Global button look; .tower-btn.active / .unaffordable overridden in-game */
 button {
   border: none;
   border-radius: 6px;
@@ -87,6 +93,7 @@ button:disabled {
   display: none;
 }
 
+/* Keyboard/tip line under controls */
 .tip {
   margin-top: 8px;
   opacity: 0.9;
@@ -98,13 +105,96 @@ button:disabled {
   gap: 12px;
 }
 
+/* Canvas column grows; tower panel fixed width */
 .game-stage {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
 }
 
+/* Next-wave preview (top-right over map) */
+.next-wave-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  max-width: 232px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: #e2e8f0;
+  pointer-events: none;
+}
+
+.next-wave-heading {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.next-wave-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.84rem;
+  margin-bottom: 0;
+}
+
+.next-wave-sep {
+  color: #64748b;
+  user-select: none;
+}
+
+.next-wave-new {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.next-wave-new-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fbbf24;
+  margin-bottom: 8px;
+}
+
+.next-wave-new-body {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+#nextWavePreviewCanvas {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  border: 1px solid rgba(100, 116, 139, 0.5);
+  background: #0f172a;
+}
+
+.next-wave-blurb {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: #cbd5e1;
+  flex: 1;
+  min-width: 0;
+}
+
+/* --- Intro transmission (full viewport) --- */
 .lore-overlay {
   position: fixed;
   inset: 0;
@@ -142,6 +232,7 @@ button:disabled {
   letter-spacing: 0.02em;
 }
 
+/* --- Start menu: map cards + difficulty --- */
 .start-overlay {
   position: fixed;
   inset: 0;
@@ -274,6 +365,7 @@ button:disabled {
   background: #475569;
 }
 
+/* --- Tower button hover stats (position set in JS) --- */
 .tower-tooltip {
   position: fixed;
   z-index: 2000;
@@ -314,6 +406,7 @@ button:disabled {
   flex-shrink: 0;
 }
 
+/* Left sidebar: gold + tower purchase buttons */
 .tower-panel {
   width: 220px;
   min-width: 220px;
@@ -323,19 +416,63 @@ button:disabled {
   padding: 12px;
 }
 
-.tower-gold-card {
+/* Gold + base HP (heart) — compact rows in tower sidebar */
+.tower-resource-card {
   margin: 0 0 10px;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(251, 191, 36, 0.55);
-  background: linear-gradient(180deg, rgba(120, 53, 15, 0.35) 0%, rgba(51, 30, 10, 0.55) 100%);
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  background: linear-gradient(
+    180deg,
+    rgba(120, 53, 15, 0.38) 0%,
+    rgba(55, 25, 18, 0.42) 55%,
+    rgba(45, 20, 22, 0.48) 100%
+  );
   color: #fde68a;
   font-weight: 700;
   letter-spacing: 0.2px;
+  font-size: 0.92rem;
 }
 
-.tower-gold-card strong {
+.tower-resource-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.tower-resource-row + .tower-resource-row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tower-resource-label {
+  font-weight: 700;
+  opacity: 0.92;
+}
+
+.tower-resource-value--gold {
   color: #facc15;
+  font-variant-numeric: tabular-nums;
+}
+
+.tower-resource-hp-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tower-hp-heart {
+  color: #ef4444;
+  font-size: 1.05rem;
+  line-height: 1;
+  text-shadow: 0 0 10px rgba(248, 113, 113, 0.45);
+}
+
+.tower-resource-value--hp {
+  color: #fecaca;
+  font-variant-numeric: tabular-nums;
 }
 
 .tower-panel h2 {
@@ -353,6 +490,7 @@ button:disabled {
   color: #cbd5e1;
 }
 
+/* Canvas scales with layout; internal pixel size is set in HTML */
 .game-stage canvas#gameCanvas {
   flex: 1;
   min-width: 0;
@@ -364,6 +502,7 @@ button:disabled {
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 }
 
+/* --- Fixed audio widget (bottom-right) --- */
 .audio-hud {
   position: fixed;
   right: 16px;
@@ -395,12 +534,64 @@ button:disabled {
   position: absolute;
   right: 0;
   bottom: 52px;
-  width: 220px;
+  width: 248px;
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+}
+
+.audio-settings-divider {
+  height: 1px;
+  margin: 4px 0 10px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.audio-settings-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  cursor: pointer;
+  color: #e2e8f0;
+}
+
+.audio-settings-toggle-row input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: #22c55e;
+  cursor: pointer;
+}
+
+.audio-settings-toggle-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-settings-hint {
+  margin: 0 0 10px;
+  padding-left: 26px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #94a3b8;
+  opacity: 0.95;
+}
+
+.kbd-hint {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-family: inherit;
+  font-weight: 700;
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  color: #f1f5f9;
 }
 
 .audio-slider-row {
@@ -409,10 +600,6 @@ button:disabled {
   gap: 6px;
   margin-bottom: 10px;
   font-size: 0.82rem;
-}
-
-.audio-slider-row:last-child {
-  margin-bottom: 0;
 }
 
 .audio-slider-row input[type="range"] {
