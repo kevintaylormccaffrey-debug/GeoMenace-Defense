@@ -24,7 +24,6 @@ const waveEl = document.getElementById("wave");
 const goldEl = document.getElementById("gold");
 const baseHpEl = document.getElementById("baseHp");
 const remainingEl = document.getElementById("remaining");
-const turretCountsEl = document.getElementById("turretCounts");
 
 const towerButtons = [...document.querySelectorAll(".tower-btn")];
 const startWaveBtn = document.getElementById("startWaveBtn");
@@ -65,6 +64,8 @@ const frostAuraSfx = new Audio("assets/frost_aura.mp3");
 const TILE_SIZE = 52;
 const COLS = Math.floor(canvas.width / TILE_SIZE);
 const ROWS = Math.floor(canvas.height / TILE_SIZE);
+/** Bottom-left next-wave HUD covers ~this many rows; paths must stay above this band. */
+const NEXT_WAVE_OVERLAY_TILE_ROWS = 3;
 const GRASS_BASE = "#5a8f46";
 const GRASS_DARK = "#4a7a3a";
 const GRASS_LIGHT = "#6fb050";
@@ -241,6 +242,8 @@ const state = {
   gameOverByBoss: false,
   speedMultiplier: 1,
   difficultyHpMultiplier: 1,
+  /** "normal" | "easy" | "hard" — set when Begin is clicked */
+  difficulty: "normal",
   gameStarted: false,
   baseDamageFlashUntil: 0,
   goldPopups: []
@@ -424,11 +427,12 @@ function pathForkMergePaths() {
     top.push([x, 0]);
   }
   top.push([8, 1], [8, 2]);
+  const bottomLaneY = ROWS - 1 - NEXT_WAVE_OVERLAY_TILE_ROWS;
   const bottom = [];
   for (let x = 0; x <= 8; x += 1) {
-    bottom.push([x, ROWS - 1]);
+    bottom.push([x, bottomLaneY]);
   }
-  for (let y = ROWS - 2; y >= 2; y -= 1) {
+  for (let y = bottomLaneY - 1; y >= 2; y -= 1) {
     bottom.push([8, y]);
   }
   const tail = [];
@@ -1818,7 +1822,7 @@ function startWave() {
   state.waveInProgress = true;
   state.spawning = true;
   state.enemiesSpawnedThisWave = 0;
-  state.enemiesToSpawnThisWave = config.enemyCount;
+  state.enemiesToSpawnThisWave = getEnemySpawnCountForWave(config);
   state.enemiesReachedBaseThisWave = 0;
   state.spawnTimer = 0;
   state.waveConfig = config;
@@ -1826,7 +1830,7 @@ function startWave() {
   trackEvent("wave_start", {
     wave: state.wave,
     map: selectedMap ? selectedMap.mapName : "unknown",
-    difficulty: state.difficultyHpMultiplier < 1 ? "easy" : "normal"
+    difficulty: state.difficulty
   });
 }
 
@@ -1915,7 +1919,7 @@ function getWaveConfig(wave) {
       hp: 2025,
       speed: 54,
       spawnInterval: 1.2,
-      baseDamage: 19,
+      baseDamage: 20,
       radius: 39,
       isBoss: true,
       color: "#7f1d1d"
@@ -1935,13 +1939,19 @@ function getWaveConfig(wave) {
   };
 }
 
+/** Hard mode: +1 spawn per wave; boss wave stays a single boss. */
+function getEnemySpawnCountForWave(config) {
+  if (state.difficulty !== "hard" || config.isBoss) {
+    return config.enemyCount;
+  }
+  return config.enemyCount + 1;
+}
+
 /** Display name for the wave-10 circle boss (shown in next-wave preview). */
 const BOSS_DISPLAY_NAME = "Zortac CircleFace";
 const BOSS_NEXT_WAVE_BLURB = `Titan Boss Detected: ${BOSS_DISPLAY_NAME}`;
-const DEFEAT_LINE_BOSS = "Zortac was able to break your defenses and encircled the city.";
+const DEFEAT_LINE_BOSS = "Zortac was able to break your defenses and has now encircled the city.";
 const DEFEAT_LINE_REGULAR = "The GeoScourge has taken the city.";
-const VICTORY_LINE_1HP = "Zortac was stopped at the city walls. The GeoScourge is defeated for now...";
-const VICTORY_LINE_ZORTAC = "Zortac has been valiantly defeated. Earth thanks you Commander.";
 
 /** Wave number that will start next (null = hide panel). */
 function getNextWaveNumber() {
@@ -2032,7 +2042,7 @@ function updateNextWavePanel() {
   nextWavePanel.classList.remove("hidden");
   nextWaveNumEl.textContent = String(nw);
   const cfg = getWaveConfig(nw);
-  nextWaveEnemyCountEl.textContent = String(cfg.enemyCount);
+  nextWaveEnemyCountEl.textContent = String(getEnemySpawnCountForWave(cfg));
 
   const preview = getNewEnemyPreview(nw);
   if (!nextWaveNewSection || !nextWaveBlurbEl) {
@@ -2693,22 +2703,11 @@ function drawVictoryScreen() {
   ctx.fillStyle = "#fff";
   ctx.font = "bold 46px Arial";
   ctx.textAlign = "center";
-  let y = canvas.height / 2 - 72;
-  ctx.fillText("Victory!", canvas.width / 2, y);
-  y += 44;
-  ctx.font = "22px Arial";
-  ctx.fillText("You have stopped the Geometric Menace for now...", canvas.width / 2, y);
-  y += 36;
-  if (state.baseHp === 1) {
-    ctx.font = "17px Arial";
-    ctx.fillText(VICTORY_LINE_1HP, canvas.width / 2, y);
-    y += 30;
-  }
-  ctx.font = "17px Arial";
-  ctx.fillText(VICTORY_LINE_ZORTAC, canvas.width / 2, y);
-  y += 36;
+  ctx.fillText("Victory!", canvas.width / 2, canvas.height / 2 - 32);
+  ctx.font = "24px Arial";
+  ctx.fillText("Zortac has been defeated. You have stopped the Geometric Menace for now...", canvas.width / 2, canvas.height / 2 + 12);
   ctx.font = "20px Arial";
-  ctx.fillText("Press Restart Game to play again.", canvas.width / 2, y);
+  ctx.fillText("Press Restart Game to play again.", canvas.width / 2, canvas.height / 2 + 48);
 }
 
 /** Boss enemies layer this on top of their shape in Enemy.draw(). */
@@ -2766,13 +2765,6 @@ function updateHud() {
   } else {
     remainingEl.textContent = String(state.enemies.length + (state.enemiesToSpawnThisWave - state.enemiesSpawnedThisWave));
   }
-  const basicCount = countTowersByType("basic");
-  const frostCount = countTowersByType("frost");
-  const iceCount = countTowersByType("ice");
-  const rocketCount = countTowersByType("rocket");
-  const railCount = countTowersByType("rail");
-  turretCountsEl.textContent = `Basic ${basicCount}/6, Ice ${iceCount}/4, Frost ${frostCount}/2, Rocket ${rocketCount}/2, Rail ${railCount}/1`;
-
   startWaveBtn.disabled =
     !state.gameStarted || state.baseHp <= 0 || state.waveInProgress || state.gameWon || state.wave > FINAL_WAVE;
   if (rerollMapBtn) {
@@ -3206,6 +3198,7 @@ function resetGameState() {
   state.gameOverByBoss = false;
   state.speedMultiplier = 1;
   state.difficultyHpMultiplier = 1;
+  state.difficulty = "normal";
   state.baseDamageFlashUntil = 0;
 }
 
@@ -3331,7 +3324,16 @@ function setupTowerTooltips() {
 
 function getSelectedDifficulty() {
   const el = document.querySelector('input[name="difficulty"]:checked');
-  return el && el.value === "easy" ? "easy" : "normal";
+  if (!el) {
+    return "normal";
+  }
+  if (el.value === "easy") {
+    return "easy";
+  }
+  if (el.value === "hard") {
+    return "hard";
+  }
+  return "normal";
 }
 
 // --- Begin: applies chosen map, difficulty HP multiplier, closes overlay, sets gameStarted ---
@@ -3343,7 +3345,9 @@ if (beginGameBtn) {
     applyMapLayout(selectedMapIdForStart);
     resetGameState();
     const difficulty = getSelectedDifficulty();
-    state.difficultyHpMultiplier = difficulty === "easy" ? 0.75 : 1;
+    state.difficulty = difficulty;
+    state.difficultyHpMultiplier =
+      difficulty === "easy" ? 0.75 : difficulty === "hard" ? 1.15 : 1;
     state.gameStarted = true;
     trackEvent("game_start", {
       map: selectedMap ? selectedMap.mapName : selectedMapIdForStart,

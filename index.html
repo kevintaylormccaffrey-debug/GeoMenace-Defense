@@ -13,7 +13,7 @@
     gtag("js", new Date());
     gtag("config", "G-C1N9ZTMCXP");
   </script>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <!-- Menu / intro music; started from game.js after user gesture (autoplay rules) -->
@@ -39,6 +39,10 @@
           <input type="radio" name="difficulty" value="easy">
           <span>Easy — all enemies have 25% less HP</span>
         </label>
+        <label class="difficulty-option">
+          <input type="radio" name="difficulty" value="hard">
+          <span>Hard — +15% enemy HP, +1 enemy per wave (boss unchanged)</span>
+        </label>
       </fieldset>
 
       <section class="map-section">
@@ -60,7 +64,6 @@
       <div class="stats">
         <span>Wave: <strong id="wave">1</strong></span>
         <span>Enemies Left: <strong id="remaining">0</strong></span>
-        <span>Turrets: <strong id="turretCounts">Basic 0/6, Ice 0/4, Frost 0/2, Rocket 0/2, Rail 0/1</strong></span>
       </div>
       <div class="controls">
         <button id="startWaveBtn" type="button">Start Wave</button>
@@ -103,7 +106,7 @@
       </aside>
 
       <div class="game-stage">
-        <div id="nextWavePanel" class="next-wave-panel hidden" aria-live="polite">
+        <div id="nextWavePanel" class="next-wave-panel next-wave-panel--map-overlay hidden" aria-live="polite">
           <div class="next-wave-heading">Next wave</div>
           <div class="next-wave-line">
             <span>Wave <strong id="nextWaveNum">1</strong></span>
@@ -113,7 +116,7 @@
           <div id="nextWaveNewSection" class="next-wave-new hidden">
             <div class="next-wave-new-badge">New enemy</div>
             <div class="next-wave-new-body">
-              <canvas id="nextWavePreviewCanvas" width="64" height="64" aria-hidden="true"></canvas>
+              <canvas id="nextWavePreviewCanvas" width="40" height="40" aria-hidden="true"></canvas>
               <p id="nextWaveBlurb" class="next-wave-blurb"></p>
             </div>
           </div>
