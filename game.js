@@ -100,7 +100,7 @@ function saveHoldFSell(value) {
 }
 
 let holdFSell = loadHoldFSell();
-const AUDIO_MAX_LEVEL = 10;
+const AUDIO_MAX_LEVEL = 25;
 const BASE_MUSIC_VOLUME = 0.5;
 const BASE_SFX_VOLUME = {
   rail: 0.45,
@@ -120,7 +120,7 @@ const TOWER_TYPES = {
       "Reliable single-target damage; shoots the enemy nearest the base (least distance left along the path).\nStats:\nCost: 100g,\nRange: 145,\nDamage: 20,\nShot Interval: 1s,\nProjectile speed 340,\nTarget Prio: Closest to base along path.\nMax 6 towers.",
     cost: 100,
     range: 145,
-    damage: 20,
+    damage: 17,
     fireRate: 1,
     color: "#2563eb",
     barrelColor: "#93c5fd",
@@ -139,7 +139,7 @@ const TOWER_TYPES = {
     color: "#0891b2",
     barrelColor: "#67e8f9",
     aura: true,
-    slowAmount: 0.35,
+    slowAmount: 0.25,
     slowDuration: 0.22,
     maxCount: 2
   },
@@ -169,7 +169,7 @@ const TOWER_TYPES = {
       "Splash damage aimed at the highest-HP enemy in range.\nStats:\nCost: 300g,\nRange: 175,\nDamage: 25,\nShot Interval: 2s,\nProjectile speed 290,\nSplash: 3 tiles,\nTarget Prio: Highest HP.\nMax 2 towers.",
     cost: 300,
     range: 175,
-    damage: 35,
+    damage: 30,
     fireRate: 2,
     color: "#7c3aed",
     barrelColor: "#c4b5fd",
@@ -188,7 +188,7 @@ const TOWER_TYPES = {
       "Piercing beam through every enemy along a line; aims for the direction that hits the most targets.\nStats:\nCost: 400g,\nRange: 350,\nDamage: 45 per hit,\nShot Interval: 4s,\nBeam speed: 1000,\nBonus vs boss: 1.5×,\nBonus vs square enemies: 1.5×,\nTarget Prio: Most enemies on line.\nMax 1 tower.",
     cost: 400,
     range: 350,
-    damage: 45,
+    damage: 40,
     fireRate: 4,
     color: "#475569",
     barrelColor: "#fbbf24",
@@ -208,12 +208,12 @@ const MAP_CATALOG = [
   {
     id: "fork",
     name: "Fork (Medium)",
-    blurb: "Two lanes merge before the base."
+    blurb: "Not a Spoon."
   },
   {
     id: "trident",
     name: "Trident (Hard)",
-    blurb: "Three top spawns merge, then a straight run to the base at bottom-right."
+    blurb: "Three top spawns merge, then a straight run to the base."
   }
 ];
 
