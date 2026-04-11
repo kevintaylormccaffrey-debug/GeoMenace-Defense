@@ -100,7 +100,9 @@ function saveHoldFSell(value) {
 }
 
 let holdFSell = loadHoldFSell();
-const AUDIO_MAX_LEVEL = 25;
+const AUDIO_MAX_LEVEL = 10;
+/** Multiplies slider output so default/max are quieter than the raw BASE_* levels alone. */
+const AUDIO_MASTER_GAIN = 0.5;
 const BASE_MUSIC_VOLUME = 0.5;
 const BASE_SFX_VOLUME = {
   rail: 0.45,
@@ -275,11 +277,17 @@ function clampAudioLevel(value) {
 }
 
 function getSfxMasterVolume() {
-  return audioSettings.muted ? 0 : audioSettings.sfxLevel / AUDIO_MAX_LEVEL;
+  if (audioSettings.muted) {
+    return 0;
+  }
+  return (audioSettings.sfxLevel / AUDIO_MAX_LEVEL) * AUDIO_MASTER_GAIN;
 }
 
 function getMusicMasterVolume() {
-  return audioSettings.muted ? 0 : audioSettings.musicLevel / AUDIO_MAX_LEVEL;
+  if (audioSettings.muted) {
+    return 0;
+  }
+  return (audioSettings.musicLevel / AUDIO_MAX_LEVEL) * AUDIO_MASTER_GAIN;
 }
 
 function applyAudioVolumes() {
